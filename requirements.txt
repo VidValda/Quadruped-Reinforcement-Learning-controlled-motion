@@ -1,0 +1,6 @@
+gymnasium
+mujoco
+pybullet
+stable-baselines3[extra]
+torch
+robot_descriptions
