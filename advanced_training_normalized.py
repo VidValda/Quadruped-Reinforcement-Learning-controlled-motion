@@ -267,8 +267,8 @@ if __name__ == "__main__":
     
     TRAIN = True 
     TOTAL_TIMESTEPS = 10_000_000 
-    MODEL_PATH = "ppo_spot_v7_advanced.zip"
-    STATS_PATH = "vec_normalize_stats_v7_advanced.pkl"
+    MODEL_PATH = "ppo_spot_v8_advanced.zip"
+    STATS_PATH = "vec_normalize_stats_v8_advanced.pkl"
     
     N_STEPS = 2048
     BATCH_SIZE = 64 
