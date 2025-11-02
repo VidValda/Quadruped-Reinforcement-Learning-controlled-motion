@@ -89,7 +89,6 @@ class CustomSpotEnv(gym.Env):
             0.0, 0.7, -1.4   # Back-right
         ])
         
-        # Define target height for the robot
         self.target_height = 0.35 
 
         # Store last action for action rate penalty
@@ -98,7 +97,7 @@ class CustomSpotEnv(gym.Env):
         num_actuators = self.model.nu
         # Action space is now a residual offset from the homing pose
         self.action_space = spaces.Box(
-            low=-0.5, # Smaller residual bounds
+            low=-0.5, 
             high=0.5, 
             shape=(num_actuators,), 
             dtype=np.float32
@@ -110,7 +109,6 @@ class CustomSpotEnv(gym.Env):
         num_sensors = 0
         num_commands = 3 # Add 3 command inputs (lin_vel_x, lin_vel_y, ang_vel_z)
         
-        # Fix: Calculate total dimension as an int
         total_obs_dim = (
             num_joint_pos + 
             num_joint_vel + 
@@ -118,10 +116,9 @@ class CustomSpotEnv(gym.Env):
             1 +  # torso_z_pos
             4 +  # torso_quat
             num_sensors +
-            num_commands # Add commands to observation shape
+            num_commands 
         )
         
-        # Fix: Pass shape as a tuple
         self.observation_space = spaces.Box(
             low=-np.inf, 
             high=np.inf, 
@@ -167,11 +164,8 @@ class CustomSpotEnv(gym.Env):
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
         
-        # Initialize state variables
         self.last_action = np.zeros(self.model.nu)
         
-        # Set a fixed command for this episode (e.g., walk forward at 0.5 m/s)
-        # In a full implementation, this would be randomized per episode
         self.target_lin_vel = np.array([0.5, 0.0]) # Target vx, vy
         self.target_ang_vel = 0.0                   # Target wz
         
@@ -184,12 +178,11 @@ class CustomSpotEnv(gym.Env):
         return obs, info
 
     def step(self, action):
-        # Apply action as a residual to the homing pose
         action = np.clip(action, self.action_space.low, self.action_space.high)
         final_action = self.default_homing_pose + action
         
-        # Clip final action to actuator limits (if any, typically -pi to pi for joints)
-        # Using a generic -2*pi to 2*pi here, adjust if model has specific limits
+        # Clip final action to actuator limits
+        # Using a generic -2*pi to 2*pi here
         final_action_clipped = np.clip(final_action, -2*np.pi, 2*np.pi)
         self.data.ctrl[:] = final_action_clipped
         
@@ -265,10 +258,10 @@ class CustomSpotEnv(gym.Env):
 
 if __name__ == "__main__":
     
-    TRAIN = True 
+    TRAIN = False 
     TOTAL_TIMESTEPS = 10_000_000 
-    MODEL_PATH = "ppo_spot_v8_advanced.zip"
-    STATS_PATH = "vec_normalize_stats_v8_advanced.pkl"
+    MODEL_PATH = "ppo_spot_v7_advanced.zip"
+    STATS_PATH = "vec_normalize_stats_v7_advanced.pkl"
     
     N_STEPS = 2048
     BATCH_SIZE = 64 

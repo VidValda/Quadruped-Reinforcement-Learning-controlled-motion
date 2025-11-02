@@ -4,3 +4,4 @@ pybullet
 stable-baselines3[extra]
 torch
 robot_descriptions
+pynput
