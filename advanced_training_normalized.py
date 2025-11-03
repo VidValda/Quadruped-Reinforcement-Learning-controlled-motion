@@ -27,6 +27,7 @@ class CustomSpotEnv(gym.Env):
         assets_dir = os.path.join(xml_dir, 'assets')
         assets_dir = os.path.abspath(assets_dir).replace('\\', '/')
 
+        # --- XML Modification Section ---
         with open(xml_path, 'r') as f:
             xml_string = f.read()
             
@@ -70,10 +71,11 @@ class CustomSpotEnv(gym.Env):
             print(e)
             print("Fallback: Loading original model without floor.")
             self.model = load_robot_description("spot_mj_description")
+        # --- End XML Modification ---
 
         self.data = mujoco.MjData(self.model)
         
-        self.frame_skip = 5 
+        self.frame_skip = 5 # --- Tunable ---
         self.dt = self.frame_skip * self.model.opt.timestep
         self.render_mode = render_mode
         self.viewer = None
@@ -82,6 +84,7 @@ class CustomSpotEnv(gym.Env):
         if self.torso_body_id == -1:
             raise ValueError("Could not find body named 'body' in the XML model.")
 
+        # --- Tunable: Default Pose ---
         self.default_homing_pose = np.array([
             0.0, 0.7, -1.4,
             0.0, 0.7, -1.4,
@@ -89,9 +92,10 @@ class CustomSpotEnv(gym.Env):
             0.0, 0.7, -1.4
         ])
         
-        self.target_height = 0.35 
+        self.target_height = 0.35 # --- Tunable ---
         self.last_action = np.zeros(self.model.nu)
 
+        # --- Tunable: Command Ranges ---
         self.command_cfg = {
             "lin_vel_x_range": [-0.5, 1.0],
             "lin_vel_y_range": [-0.3, 0.3],
@@ -104,13 +108,15 @@ class CustomSpotEnv(gym.Env):
         self.target_ang_vel = 0.0
 
         num_actuators = self.model.nu
+        # --- Action Space Definition ---
         self.action_space = spaces.Box(
-            low=-0.5, 
-            high=0.5, 
+            low=-0.5, # --- Tunable ---
+            high=0.5, # --- Tunable ---
             shape=(num_actuators,), 
             dtype=np.float32
         )
         
+        # --- Observation Space Definition ---
         num_joint_pos = self.model.nq - 7
         num_joint_vel = self.model.nv - 6
         num_root_vel = 6 
@@ -139,6 +145,7 @@ class CustomSpotEnv(gym.Env):
         torso_quat = self.data.body(self.torso_body_id).xquat
         torso_z_pos = torso_xpos[2]
 
+        # --- Observation Vector ---
         return np.concatenate([
             self.data.qpos[7:],    
             self.data.qvel[6:],    
@@ -165,12 +172,14 @@ class CustomSpotEnv(gym.Env):
         return roll, pitch
 
     def _resample_commands(self):
+        # --- Command Sampling ---
         self.target_lin_vel[0] = self.np_random.uniform(*self.command_cfg["lin_vel_x_range"])
         self.target_lin_vel[1] = self.np_random.uniform(*self.command_cfg["lin_vel_y_range"])
         self.target_ang_vel = self.np_random.uniform(*self.command_cfg["ang_vel_range"])
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
+        # --- Reset Simulation ---
         mujoco.mj_resetData(self.model, self.data)
         
         self.last_action = np.zeros(self.model.nu)
@@ -186,28 +195,32 @@ class CustomSpotEnv(gym.Env):
         return obs, info
 
     def step(self, action):
+        # --- Action Application ---
         action = np.clip(action, self.action_space.low, self.action_space.high)
         final_action = self.default_homing_pose + action
         
         final_action_clipped = np.clip(final_action, -2*np.pi, 2*np.pi)
         self.data.ctrl[:] = final_action_clipped
         
+        # --- Simulation Step ---
         mujoco.mj_step(self.model, self.data, nstep=self.frame_skip)
         self.episode_length_buf += 1
         
+        # --- Resample Command ---
         if self.episode_length_buf % self.resampling_steps == 0:
             self._resample_commands()
         
         obs = self._get_obs()
 
+        # --- Reward Calculation ---
         current_lin_vel = self.data.body(self.torso_body_id).cvel[3:5]
         current_ang_vel = self.data.body(self.torso_body_id).cvel[2]
         
         lin_vel_error = np.linalg.norm(self.target_lin_vel - current_lin_vel)
         ang_vel_error = np.square(self.target_ang_vel - current_ang_vel)
         
-        lin_vel_reward = np.exp(-1.5 * lin_vel_error)
-        ang_vel_reward = np.exp(-1.0 * ang_vel_error)
+        lin_vel_reward = np.exp(-1.5 * lin_vel_error) # --- Tunable: Reward Weight ---
+        ang_vel_reward = np.exp(-1.0 * ang_vel_error) # --- Tunable: Reward Weight ---
         
         torso_z_pos = self.data.body(self.torso_body_id).xpos[2]
         torso_quat = self.data.body(self.torso_body_id).xquat
@@ -221,6 +234,7 @@ class CustomSpotEnv(gym.Env):
 
         self.last_action = action
         
+        # --- Total Reward (Tunable Weights) ---
         reward = (
             2.0 * lin_vel_reward +
             1.0 * ang_vel_reward -
@@ -230,10 +244,11 @@ class CustomSpotEnv(gym.Env):
             0.01 * control_cost
         )
         
+        # --- Termination Condition ---
         terminated = torso_z_pos < 0.2
         
         if terminated:
-            reward = -10.0
+            reward = -10.0 # --- Tunable: Fall Penalty ---
 
         truncated = False
         info = {}
@@ -260,16 +275,19 @@ class CustomSpotEnv(gym.Env):
 
 def make_env(render_mode=None):
     env = CustomSpotEnv(render_mode=render_mode)
-    env = gym.wrappers.TimeLimit(env, max_episode_steps=1000) 
+    env = gym.wrappers.TimeLimit(env, max_episode_steps=1000) # --- Tunable: Max Steps ---
     return env
 
 def main():
+    # --- Main Toggles ---
     TRAIN = False
-    VIS = True
-    TOTAL_TIMESTEPS = 30_000_000
-    MODEL_PATH = "ppo_spot_v9.zip"
-    STATS_PATH = "vec_normalize_stats_v9.pkl"
     
+    # --- Training Config ---
+    TOTAL_TIMESTEPS = 30_000_000
+    MODEL_PATH = "ppo_spot_v10.zip"
+    STATS_PATH = "vec_normalize_stats_v10.pkl"
+    
+    # --- PPO Hyperparameters (Tunable) ---
     N_STEPS = 2048
     BATCH_SIZE = 64
     N_EPOCHS = 10
@@ -288,6 +306,7 @@ def main():
         print("Wrapping environment with VecNormalize...")
         env = VecNormalize(env, norm_obs=True, norm_reward=True, gamma=GAMMA)
 
+        # --- Model Definition ---
         model = PPO(
             "MlpPolicy", 
             env, 
@@ -313,7 +332,7 @@ def main():
         print(f"--- TRAINING COMPLETE ---")
         env.close() 
 
-    if VIS:
+    else:
         print(f"--- STARTING VISUALIZATION ---")
         if not os.path.exists(MODEL_PATH) or not os.path.exists(STATS_PATH):
             print(f"Error: Model file '{MODEL_PATH}' or stats file '{STATS_PATH}' not found.")
@@ -334,6 +353,7 @@ def main():
         model = PPO.load(MODEL_PATH, env=vis_env, device=DEVICE)
         print("--- MODEL LOADED ---")
 
+        # --- Visualization Loop ---
         for episode in range(10):
             obs = vis_env.reset()
             terminated = False
@@ -356,9 +376,6 @@ def main():
         vis_env.close()
         print("--- VISUALIZATION COMPLETE ---")
     
-    if not TRAIN and not VIS:
-        print("No action specified. Set TRAIN = True or VIS = True to run.")
-
 if __name__ == "__main__":
     main()
 
