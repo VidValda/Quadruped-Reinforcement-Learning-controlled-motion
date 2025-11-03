@@ -264,11 +264,11 @@ def make_env(render_mode=None):
     return env
 
 def main():
-    TRAIN = True
+    TRAIN = False
     VIS = True
-    TOTAL_TIMESTEPS = 10_000_000
-    MODEL_PATH = "ppo_spot_v8.zip"
-    STATS_PATH = "vec_normalize_stats_v8.pkl"
+    TOTAL_TIMESTEPS = 30_000_000
+    MODEL_PATH = "ppo_spot_v9.zip"
+    STATS_PATH = "vec_normalize_stats_v9.pkl"
     
     N_STEPS = 2048
     BATCH_SIZE = 64
