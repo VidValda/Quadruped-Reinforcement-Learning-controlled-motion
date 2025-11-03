@@ -240,8 +240,8 @@ class CustomSpotEnv(gym.Env):
             1.0 * ang_vel_reward -
             2.0 * height_penalty -
             1.0 * orientation_penalty -
-            0.05 * action_rate_penalty -
-            0.01 * control_cost
+            0.1 * action_rate_penalty -
+            0.03 * control_cost
         )
         
         # --- Termination Condition ---
