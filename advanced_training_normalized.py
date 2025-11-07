@@ -214,7 +214,7 @@ class CustomSpotEnv(gym.Env):
         
         obs = self._get_obs()
 
-        # --- Reward Calculation ---
+        # --- Reward Calculation --- Review normalization of parts
         current_lin_vel = self.data.body(self.torso_body_id).cvel[3:5]
         current_ang_vel = self.data.body(self.torso_body_id).cvel[2]
         
