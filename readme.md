@@ -20,3 +20,7 @@ Notes:
 # Code
 
 Study and try to run advanced_training_normalized.py
+
+# Evaluate
+
+tensorboard --logdir=./spot_tensorboard_advanced

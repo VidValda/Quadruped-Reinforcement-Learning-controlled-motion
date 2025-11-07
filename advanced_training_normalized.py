@@ -242,7 +242,7 @@ class CustomSpotEnv(gym.Env):
             1.0 * ang_vel_reward -
             2.0 * height_penalty -
             1.0 * orientation_penalty -
-            0.1 * action_rate_penalty -
+            0.5 * action_rate_penalty -
             0.03 * control_cost
         )
         
@@ -282,12 +282,12 @@ def make_env(render_mode=None):
 
 def main():
     # --- Main Toggles ---
-    TRAIN = False
+    TRAIN = True
     
     # --- Training Config ---
-    TOTAL_TIMESTEPS = 30_000_000
-    MODEL_PATH = "ppo_spot_v10.zip"
-    STATS_PATH = "vec_normalize_stats_v10.pkl"
+    TOTAL_TIMESTEPS = 20_000_000
+    MODEL_PATH = "ppo_spot_v11.zip"
+    STATS_PATH = "vec_normalize_stats_v11.pkl"
     
     # --- PPO Hyperparameters (Tunable) ---
     N_STEPS = 2048
