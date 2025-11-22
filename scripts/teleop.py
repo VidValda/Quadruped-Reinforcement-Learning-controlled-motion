@@ -25,18 +25,6 @@ def main():
     model, vis_env = load_policy_for_teleop()
     print("--- MODEL AND NORMALISATION STATS LOADED ---")
 
-    print("\n" + "="*60)
-    print(" CONTROLES DEL ROBOT SPOT:")
-    print("   w/s: Adelante/Atrás")
-    print("   a/d: Izquierda/Derecha") 
-    print("   q/e: Girar izquierda/derecha")
-    print("   x: Detener movimiento")
-    print("   m: Cambiar modo manual/automático")
-    print("   8: Salir del programa")
-    print("\n Empezando en modo AUTOMÁTICO")
-    print("  La ventana del robot debería aparecer...")
-    print("="*60)
-
     obs = vis_env.reset()
     keyboard_controller.state.lin_x = 0.0
     keyboard_controller.state.lin_y = 0.0
@@ -59,16 +47,10 @@ def main():
             )
             
             if keyboard_controller.state.manual_mode:
-                # MANUAL MODE - use direct joint control
                 vis_env.env_method("enable_manual_control")
-                action = np.zeros(vis_env.action_space.shape)  # Will be overridden in step()
+                action = np.zeros(vis_env.action_space.shape)
                 
-                if step_count % 30 == 0:  # Show every 30 steps
-                    print(f"  MODO MANUAL - Comandos: lin_x={keyboard_controller.state.lin_x:.1f}, "
-                          f"lin_y={keyboard_controller.state.lin_y:.1f}, "
-                          f"ang_z={keyboard_controller.state.ang_z:.1f}")
             else:
-                # AUTOMATIC MODE - use trained model
                 vis_env.env_method("disable_manual_control")
                 vis_env.env_method(
                     "set_target_velocities",
@@ -78,20 +60,10 @@ def main():
                 action, _ = model.predict(obs, deterministic=True)
                 
                 if step_count % 50 == 0:  # Show every 50 steps
-                    env = vis_env.envs[0]
+                    env = vis_env.envs[0].env if hasattr(vis_env.envs[0], 'env') else vis_env.envs[0]
                     current_lin_vel = env.data.body(env.torso_body_id).cvel[3:5]
                     current_ang_vel = env.data.body(env.torso_body_id).cvel[2]
-                    print("=" * 50)
-                    print(f" MODO AUTOMÁTICO")
-                    print(f" COMANDOS: lin_x={keyboard_controller.state.lin_x:.1f}, "
-                          f"lin_y={keyboard_controller.state.lin_y:.1f}, "
-                          f"ang_z={keyboard_controller.state.ang_z:.1f}")
-                    print(f" REALIDAD: lin_x={current_lin_vel[0]:.2f}, "
-                          f"lin_y={current_lin_vel[1]:.2f}, ang_z={current_ang_vel:.2f}")
-                    torso_z_pos = env.data.body(env.torso_body_id).xpos[2]
-                    print(f" ALTURA: {torso_z_pos:.2f}m - "
-                          f"{' ESTABLE' if torso_z_pos > 0.3 else ' INESTABLE'}")
-                    print("=" * 50)
+
 
             vec_obs, _, vec_dones, vec_infos = vis_env.step(action)
 

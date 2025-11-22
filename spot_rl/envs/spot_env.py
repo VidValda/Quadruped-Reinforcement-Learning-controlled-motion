@@ -91,11 +91,9 @@ class CustomSpotEnv(gym.Env):
 
     def enable_manual_control(self):
         self.command_manager.enable_manual_control()
-        print("Manual control enabled in Environment.")
     
     def disable_manual_control(self):
         self.command_manager.disable_manual_control()
-        print("Manual control disabled in Environment.")
 
     def set_target_velocities(self, lin_vel, ang_vel):
         self.command_manager.set_manual_targets(lin_vel, ang_vel)

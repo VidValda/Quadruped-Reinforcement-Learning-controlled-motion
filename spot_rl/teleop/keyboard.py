@@ -31,13 +31,19 @@ class TeleopState:
 
     def print_status(self):
         os.system("clear" if os.name != "nt" else "cls")
-        print("--- Robot Teleop Commands ---")
-        print(f"Forward (w/s): {self.lin_x:.2f} m/s")
-        print(f"Strafe (a/d):  {self.lin_y:.2f} m/s")
-        print(f"Turn (q/e):    {self.ang_z:.2f} rad/s")
-        print(f"Stop (x):      Detener")
+        if not self.manual_mode:
+            print("--- Robot Teleop Commands ---")
+            print(f"Forward (w/s): {self.lin_x:.2f} m/s")
+            print(f"Strafe (a/d):  {self.lin_y:.2f} m/s")
+            print(f"Turn (q/e):    {self.ang_z:.2f} rad/s")
+            print(f"Stop (x):      Detener")
+        else:
+            print(f"  MODO MANUAL - Comandos: lin_x={self.lin_x:.1f}, "
+                  f"lin_y={self.lin_y:.1f}, "
+                  f"ang_z={self.ang_z:.1f}")
         print(f"Mode (m): {'MANUAL' if self.manual_mode else 'AUTOMÁTICO'}")
         print("\nPress '8' to stop.")
+        
 
 
 class KeyboardController:
