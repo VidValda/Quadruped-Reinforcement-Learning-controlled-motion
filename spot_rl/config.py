@@ -22,7 +22,7 @@ class SimulationConfig:
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    total_timesteps: int = 10_000_000
+    total_timesteps: int = 30_000_000
     n_steps: int = 2048
     batch_size: int = 64
     n_epochs: int = 10
