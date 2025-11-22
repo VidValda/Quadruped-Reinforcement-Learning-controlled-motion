@@ -38,42 +38,43 @@ class SpotRewardCalculator:
             pitch = np.arcsin(sinp)
         return roll, pitch
 
-    def __call__(self, data, action, last_action, target_lin_vel, target_ang_vel, torso_body_id: int):
+    def __call__(self, data, action, last_action, target_lin_vel, target_ang_vel, torso_body_id: int, manual_control: bool = False):
         current_lin_vel = data.body(torso_body_id).cvel[3:5]
         current_ang_vel = data.body(torso_body_id).cvel[2]
         torso_z_pos = data.body(torso_body_id).xpos[2]
         torso_quat = data.body(torso_body_id).xquat
 
-        lin_vel_error = np.linalg.norm(target_lin_vel - current_lin_vel)
-        ang_vel_error = np.square(target_ang_vel - current_ang_vel)
+        reward = 0.0
 
-        lin_vel_reward = np.exp(-1.5 * lin_vel_error)
-        ang_vel_reward = np.exp(-1.0 * ang_vel_error)
+        # 1. Reward for following target velocities (only in automatic mode)
+        if not manual_control:
+            lin_vel_error = np.linalg.norm(current_lin_vel - target_lin_vel)
+            ang_vel_error = abs(current_ang_vel - target_ang_vel)
+            
+            reward += 3.0 * np.exp(-2.0 * lin_vel_error)
+            reward += 2.0 * np.exp(-1.5 * ang_vel_error)
 
+        # 2. Penalty for incorrect height
+        height_error = abs(torso_z_pos - self.target_height)
+        reward -= 1.0 * height_error
+
+        # 3. Penalty for tilt
         roll, pitch = self._quat_to_roll_pitch(torso_quat)
+        orientation_penalty = roll**2 + pitch**2
+        reward -= 0.5 * orientation_penalty
 
-        height_penalty = np.square(torso_z_pos - self.target_height)
-        orientation_penalty = np.square(roll) + np.square(pitch)
-
-        action_rate_penalty = np.sum(np.square(action - last_action))
-        control_cost = np.sum(np.square(action))
-
-        reward = (
-            self.lin_vel_weight * lin_vel_reward
-            + self.ang_vel_weight * ang_vel_reward
-            - self.height_penalty_weight * height_penalty
-            - self.orientation_penalty_weight * orientation_penalty
-            - self.action_rate_weight * action_rate_penalty
-            - self.control_cost_weight * control_cost
-        )
-
+        # 4. Termination for falling
         terminated = torso_z_pos < self.termination_height_threshold
         if terminated:
-            reward = self.termination_reward
+            reward -= 10.0
+
+        # 5. Penalty for abrupt actions
+        action_penalty = np.sum(np.square(action - last_action))
+        reward -= 0.01 * action_penalty
 
         info = {
-            "lin_vel_error": float(lin_vel_error),
-            "ang_vel_error": float(ang_vel_error),
+            "lin_vel_error": float(np.linalg.norm(current_lin_vel - target_lin_vel)) if not manual_control else 0.0,
+            "ang_vel_error": float(abs(current_ang_vel - target_ang_vel)) if not manual_control else 0.0,
             "torso_height": float(torso_z_pos),
             "roll": float(roll),
             "pitch": float(pitch),

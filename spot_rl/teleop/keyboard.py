@@ -23,7 +23,7 @@ class TeleopState:
     lin_y: float = 0.0
     ang_z: float = 0.0
     stop: bool = False
-
+    manual_mode: bool = False
     def clamp(self):
         self.lin_x = float(np.clip(self.lin_x, *COMMAND.lin_vel_x_range))
         self.lin_y = float(np.clip(self.lin_y, *COMMAND.lin_vel_y_range))
@@ -35,6 +35,8 @@ class TeleopState:
         print(f"Forward (w/s): {self.lin_x:.2f} m/s")
         print(f"Strafe (a/d):  {self.lin_y:.2f} m/s")
         print(f"Turn (q/e):    {self.ang_z:.2f} rad/s")
+        print(f"Stop (x):      Detener")
+        print(f"Mode (m): {'MANUAL' if self.manual_mode else 'AUTOMÁTICO'}")
         print("\nPress '8' to stop.")
 
 
@@ -63,6 +65,11 @@ class KeyboardController:
                 self.state.ang_z += 0.1
             elif key.char == "e":
                 self.state.ang_z -= 0.1
+            elif key.char == "x":
+                self.state.lin_x, self.state.lin_y, self.state.ang_z = 0.0, 0.0, 0.0
+            elif key.char == "m":
+                self.state.manual_mode = not self.state.manual_mode
+                print(f"🔧 Modo: {'MANUAL' if self.state.manual_mode else 'AUTOMÁTICO'}")
             elif key.char == "8":
                 self.state.stop = True
         except AttributeError:

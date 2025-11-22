@@ -32,6 +32,10 @@ spot reinforcement learning/
 ## Installation
 
 ```bash
+# (Optional) to avoid common errors
+sudo apt update
+sudo apt update
+
 # (Optional) create a fresh env
 python -m venv rl_env
 source rl_env/bin/activate  # Windows: rl_env\Scripts\activate

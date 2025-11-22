@@ -33,17 +33,17 @@ class CustomSpotEnv(gym.Env):
         self.default_homing_pose = np.array(
             [
                 0.0,
-                0.7,
-                -1.4,
+                0.8,
+                -1.6,
                 0.0,
-                0.7,
-                -1.4,
+                0.8,
+                -1.6,
                 0.0,
-                0.7,
-                -1.4,
+                0.8,
+                -1.6,
                 0.0,
-                0.7,
-                -1.4,
+                0.8,
+                -1.6,
             ]
         )
 
@@ -61,15 +61,23 @@ class CustomSpotEnv(gym.Env):
         self.reward_calculator = SpotRewardCalculator(target_height=self.target_height)
 
         num_actuators = self.model.nu
-        self.action_space = spaces.Box(low=-0.5, high=0.5, shape=(num_actuators,), dtype=np.float32)
+        self.action_space = spaces.Box(low=-0.2, high=0.2, shape=(num_actuators,), dtype=np.float32)
+        
+        # Variables for manual control (direct joint control)
+        self.manual_lin_x = 0.0
+        self.manual_lin_y = 0.0
+        self.manual_ang_z = 0.0
 
         num_joint_pos = self.model.nq - 7
         num_joint_vel = self.model.nv - 6
-        num_root_vel = 6
-        num_sensors = 0
-        num_commands = 3
+        num_lin_vel = 3
+        num_ang_vel = 3
+        num_orientation = 2  # roll and pitch instead of quaternion
+        num_height = 1
+        num_target_vel = 3
 
-        total_obs_dim = num_joint_pos + num_joint_vel + num_root_vel + 1 + 4 + num_sensors + num_commands
+        total_obs_dim = (num_joint_pos + num_joint_vel + num_lin_vel + 
+                        num_ang_vel + num_orientation + num_height + num_target_vel)
 
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(total_obs_dim,), dtype=np.float32)
 
@@ -84,9 +92,43 @@ class CustomSpotEnv(gym.Env):
     def enable_manual_control(self):
         self.command_manager.enable_manual_control()
         print("Manual control enabled in Environment.")
+    
+    def disable_manual_control(self):
+        self.command_manager.disable_manual_control()
+        print("Manual control disabled in Environment.")
 
     def set_target_velocities(self, lin_vel, ang_vel):
         self.command_manager.set_manual_targets(lin_vel, ang_vel)
+    
+    def update_manual_commands(self, lin_x, lin_y, ang_z):
+        """Update manual commands from keyboard for direct joint control"""
+        self.manual_lin_x = lin_x
+        self.manual_lin_y = lin_y
+        self.manual_ang_z = ang_z
+    
+    def get_manual_action(self):
+        """Convert manual commands into action for joints (bypasses model)"""
+        action = np.zeros(self.model.nu)
+        
+        # Map commands to different leg joints
+        action[0:3] += self.manual_lin_x * 0.1  # Front left leg
+        action[3:6] += self.manual_lin_x * 0.1  # Front right leg
+        action[6:9] += self.manual_lin_x * 0.1  # Rear left leg
+        action[9:12] += self.manual_lin_x * 0.1  # Rear right leg
+        
+        # Left/Right affects balance
+        action[0:3] += self.manual_lin_y * 0.05
+        action[3:6] -= self.manual_lin_y * 0.05
+        action[6:9] += self.manual_lin_y * 0.05
+        action[9:12] -= self.manual_lin_y * 0.05
+        
+        # Rotation affects opposite legs
+        action[0:3] += self.manual_ang_z * 0.08
+        action[3:6] -= self.manual_ang_z * 0.08
+        action[6:9] -= self.manual_ang_z * 0.08
+        action[9:12] += self.manual_ang_z * 0.08
+        
+        return np.clip(action, self.action_space.low, self.action_space.high)
 
     @property
     def manual_control(self):
@@ -99,6 +141,14 @@ class CustomSpotEnv(gym.Env):
 
         self.last_action = np.zeros(self.model.nu)
         self.command_manager.reset()
+        self.manual_lin_x = 0.0
+        self.manual_lin_y = 0.0
+        self.manual_ang_z = 0.0
+        
+        # Gradual initialization
+        for i in range(50):
+            self.data.ctrl[:] = self.default_homing_pose * (i / 50.0)
+            mujoco.mj_step(self.model, self.data)
 
         obs = self._get_obs()
         info = {}
@@ -109,6 +159,10 @@ class CustomSpotEnv(gym.Env):
         return obs, info
 
     def step(self, action):
+        # Manual control override - use direct joint control
+        if self.manual_control:
+            action = self.get_manual_action()
+        
         action = np.clip(action, self.action_space.low, self.action_space.high)
         final_action = self.default_homing_pose + action
 
@@ -127,6 +181,7 @@ class CustomSpotEnv(gym.Env):
             self.command_manager.target_lin_vel,
             self.command_manager.target_ang_vel,
             self.torso_body_id,
+            manual_control=self.manual_control,
         )
         self.last_action = action
 
