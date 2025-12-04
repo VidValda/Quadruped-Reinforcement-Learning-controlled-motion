@@ -33,17 +33,17 @@ class CustomSpotEnv(gym.Env):
         self.default_homing_pose = np.array(
             [
                 0.0,
-                0.7,
-                -1.4,
+                0.8,
+                -1.6,
                 0.0,
-                0.7,
-                -1.4,
+                0.8,
+                -1.6,
                 0.0,
-                0.7,
-                -1.4,
+                0.8,
+                -1.6,
                 0.0,
-                0.7,
-                -1.4,
+                0.8,
+                -1.6,
             ]
         )
 
@@ -69,7 +69,7 @@ class CustomSpotEnv(gym.Env):
         num_sensors = 0
         num_commands = 3
 
-        total_obs_dim = num_joint_pos + num_joint_vel + num_root_vel + 1 + 4 + num_sensors + num_commands
+        total_obs_dim = num_joint_pos + num_joint_vel + num_root_vel + 1 + 2 + num_sensors + num_commands
 
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(total_obs_dim,), dtype=np.float32)
 

@@ -16,7 +16,7 @@ class CommandConfig:
 @dataclass(frozen=True)
 class SimulationConfig:
     frame_skip: int = 5
-    target_height: float = 0.35
+    target_height: float = 0.40
     max_episode_steps: int = 1000
 
 
@@ -33,8 +33,8 @@ class TrainingConfig:
 
 @dataclass(frozen=True)
 class PathConfig:
-    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v11.zip"
-    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v11.pkl"
+    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v12.zip"
+    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v12.pkl"
     tensorboard_log: Path = ROOT_DIR / "spot_tensorboard_advanced"
 
 
