@@ -1,5 +1,7 @@
 import numpy as np
 
+from spot_rl.envs.utils import quat_to_roll_pitch
+
 
 class SpotRewardCalculator:
     def __init__(
@@ -24,20 +26,6 @@ class SpotRewardCalculator:
         self.termination_height_threshold = termination_height_threshold
         self.termination_reward = termination_reward
 
-    @staticmethod
-    def _quat_to_roll_pitch(quat):
-        w, x, y, z = quat[0], quat[1], quat[2], quat[3]
-        sinr_cosp = 2 * (w * x + y * z)
-        cosr_cosp = 1 - 2 * (x * x + y * y)
-        roll = np.arctan2(sinr_cosp, cosr_cosp)
-
-        sinp = 2 * (w * y - z * x)
-        if np.abs(sinp) >= 1:
-            pitch = np.copysign(np.pi / 2, sinp)
-        else:
-            pitch = np.arcsin(sinp)
-        return roll, pitch
-
     def __call__(self, data, action, last_action, target_lin_vel, target_ang_vel, torso_body_id: int):
         current_lin_vel = data.body(torso_body_id).cvel[3:5]
         current_ang_vel = data.body(torso_body_id).cvel[2]
@@ -50,7 +38,7 @@ class SpotRewardCalculator:
         lin_vel_reward = np.exp(-1.5 * lin_vel_error)
         ang_vel_reward = np.exp(-1.0 * ang_vel_error)
 
-        roll, pitch = self._quat_to_roll_pitch(torso_quat)
+        roll, pitch = quat_to_roll_pitch(torso_quat)
 
         height_penalty = np.square(torso_z_pos - self.target_height)
         orientation_penalty = np.square(roll) + np.square(pitch)
