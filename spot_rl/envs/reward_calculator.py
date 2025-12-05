@@ -7,65 +7,123 @@ class SpotRewardCalculator:
     def __init__(
         self,
         target_height: float,
-        lin_vel_weight: float = 2.0,
-        ang_vel_weight: float = 1.0,
-        height_penalty_weight: float = 2.0,
-        orientation_penalty_weight: float = 1.0,
-        action_rate_weight: float = 1,
-        control_cost_weight: float = 0.03,
-        termination_height_threshold: float = 0.2,
-        termination_reward: float = -10.0,
+        reward_scales: dict,
+        dt: float,
+        jump_reward_steps: int = 30,
+        tracking_sigma: float = 0.25,
     ) -> None:
         self.target_height = target_height
-        self.lin_vel_weight = lin_vel_weight
-        self.ang_vel_weight = ang_vel_weight
-        self.height_penalty_weight = height_penalty_weight
-        self.orientation_penalty_weight = orientation_penalty_weight
-        self.action_rate_weight = action_rate_weight
-        self.control_cost_weight = control_cost_weight
-        self.termination_height_threshold = termination_height_threshold
-        self.termination_reward = termination_reward
+        self.reward_scales = {k: v * dt for k, v in reward_scales.items()}
+        self.jump_reward_steps = jump_reward_steps
+        self.tracking_sigma = tracking_sigma
+        
+        self.episode_sums = {name: 0.0 for name in self.reward_scales.keys()}
 
-    def __call__(self, data, action, last_action, target_lin_vel, target_ang_vel, torso_body_id: int):
-        current_lin_vel = data.body(torso_body_id).cvel[3:5]
-        current_ang_vel = data.body(torso_body_id).cvel[2]
-        torso_z_pos = data.body(torso_body_id).xpos[2]
-        torso_quat = data.body(torso_body_id).xquat
+    def reset_episode_sums(self):
+        self.episode_sums = {name: 0.0 for name in self.reward_scales.keys()}
 
-        lin_vel_error = np.linalg.norm(target_lin_vel - current_lin_vel)
-        ang_vel_error = np.square(target_ang_vel - current_ang_vel)
+    def __call__(
+        self,
+        data,
+        action,
+        last_action,
+        commands,
+        base_lin_vel,
+        base_ang_vel,
+        base_pos,
+        base_quat,
+        dof_pos,
+        dof_vel,
+        default_dof_pos,
+        jump_toggled_buf,
+        jump_target_height,
+        torso_body_id: int,
+    ):
+        reward = 0.0
+        reward_dict = {}
 
-        lin_vel_reward = np.exp(-1.5 * lin_vel_error)
-        ang_vel_reward = np.exp(-1.0 * ang_vel_error)
+        for name, scale in self.reward_scales.items():
+            rew_func = getattr(self, f"_reward_{name}")
+            rew = rew_func(
+                commands,
+                base_lin_vel,
+                base_ang_vel,
+                base_pos,
+                base_quat,
+                dof_pos,
+                dof_vel,
+                default_dof_pos,
+                action,
+                last_action,
+                jump_toggled_buf,
+                jump_target_height,
+            )
+            scaled_rew = rew * scale
+            reward += scaled_rew
+            reward_dict[name] = float(rew)
+            self.episode_sums[name] += scaled_rew
 
-        roll, pitch = quat_to_roll_pitch(torso_quat)
-
-        height_penalty = np.square(torso_z_pos - self.target_height)
-        orientation_penalty = np.square(roll) + np.square(pitch)
-
-        action_rate_penalty = np.sum(np.square(action - last_action))
-        control_cost = np.sum(np.square(action))
-
-        reward = (
-            self.lin_vel_weight * lin_vel_reward
-            + self.ang_vel_weight * ang_vel_reward
-            - self.height_penalty_weight * height_penalty
-            - self.orientation_penalty_weight * orientation_penalty
-            - self.action_rate_weight * action_rate_penalty
-            - self.control_cost_weight * control_cost
-        )
-
-        terminated = torso_z_pos < self.termination_height_threshold
-        if terminated:
-            reward = self.termination_reward
+        roll, pitch = quat_to_roll_pitch(base_quat)
+        
+        terminated = base_pos[2] < 0.2
 
         info = {
-            "lin_vel_error": float(lin_vel_error),
-            "ang_vel_error": float(ang_vel_error),
-            "torso_height": float(torso_z_pos),
+            "reward": float(reward),
             "roll": float(roll),
             "pitch": float(pitch),
+            "torso_height": float(base_pos[2]),
+            **reward_dict,
         }
 
         return reward, terminated, info
 
+    def _reward_tracking_lin_vel(self, commands, base_lin_vel, *args, **kwargs):
+        lin_vel_error = np.sum(np.square(commands[:2] - base_lin_vel[:2]))
+        return np.exp(-lin_vel_error / self.tracking_sigma)
+
+    def _reward_tracking_ang_vel(self, commands, base_lin_vel, base_ang_vel, *args, **kwargs):
+        ang_vel_error = np.square(commands[2] - base_ang_vel[2] if len(base_ang_vel) > 2 else base_ang_vel[0])
+        return np.exp(-ang_vel_error / self.tracking_sigma)
+
+    def _reward_lin_vel_z(self, *args, base_lin_vel, jump_toggled_buf, **kwargs):
+        active_mask = 1.0 if jump_toggled_buf < 0.01 else 0.0
+        return active_mask * np.square(base_lin_vel[2])
+
+    def _reward_action_rate(self, *args, action, last_action, jump_toggled_buf, **kwargs):
+        active_mask = 1.0 if jump_toggled_buf < 0.01 else 0.0
+        return active_mask * np.sum(np.square(last_action - action))
+
+    def _reward_similar_to_default(self, *args, dof_pos, default_dof_pos, jump_toggled_buf, **kwargs):
+        active_mask = 1.0 if jump_toggled_buf < 0.01 else 0.0
+        return active_mask * np.sum(np.abs(dof_pos - default_dof_pos))
+
+    def _reward_base_height(self, commands, *args, base_pos, jump_toggled_buf, **kwargs):
+        active_mask = 1.0 if jump_toggled_buf < 0.01 else 0.0
+        return active_mask * np.square(base_pos[2] - commands[3])
+
+    def _reward_jump_height_tracking(self, *args, base_pos, jump_toggled_buf, jump_target_height, **kwargs):
+        mask = (jump_toggled_buf >= 0.3 * self.jump_reward_steps) & (jump_toggled_buf < 0.6 * self.jump_reward_steps)
+        if not mask:
+            return 0.0
+        height_diff = np.exp(-np.square(base_pos[2] - jump_target_height))
+        return height_diff
+
+    def _reward_jump_height_achievement(self, *args, base_pos, jump_toggled_buf, jump_target_height, **kwargs):
+        mask = (jump_toggled_buf >= 0.3 * self.jump_reward_steps) & (jump_toggled_buf < 0.6 * self.jump_reward_steps)
+        if not mask:
+            return 0.0
+        binary_bonus = 1.0 if np.abs(base_pos[2] - jump_target_height) < 0.2 else 0.0
+        return binary_bonus
+
+    def _reward_jump_speed(self, *args, base_lin_vel, jump_toggled_buf, **kwargs):
+        mask = (jump_toggled_buf >= 0.3 * self.jump_reward_steps) & (jump_toggled_buf < 0.6 * self.jump_reward_steps)
+        if not mask:
+            return 0.0
+        return np.exp(base_lin_vel[2]) * 0.2
+
+    def _reward_jump_landing(self, *args, base_pos, jump_toggled_buf, **kwargs):
+        mask = jump_toggled_buf >= 0.6 * self.jump_reward_steps
+        if not mask:
+            return 0.0
+        height_error = -np.square(base_pos[2] - self.target_height)
+        return height_error

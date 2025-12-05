@@ -22,12 +22,16 @@ class TeleopState:
     lin_x: float = 0.0
     lin_y: float = 0.0
     ang_z: float = 0.0
+    height: float = 0.35
+    jump: float = 0.0
     stop: bool = False
 
     def clamp(self):
         self.lin_x = float(np.clip(self.lin_x, *COMMAND.lin_vel_x_range))
         self.lin_y = float(np.clip(self.lin_y, *COMMAND.lin_vel_y_range))
         self.ang_z = float(np.clip(self.ang_z, *COMMAND.ang_vel_range))
+        self.height = float(np.clip(self.height, *COMMAND.height_range))
+        self.jump = float(np.clip(self.jump, *COMMAND.jump_range))
 
     def print_status(self):
         os.system("clear" if os.name != "nt" else "cls")
@@ -35,7 +39,9 @@ class TeleopState:
         print(f"Forward (w/s): {self.lin_x:.2f} m/s")
         print(f"Strafe (a/d):  {self.lin_y:.2f} m/s")
         print(f"Turn (q/e):    {self.ang_z:.2f} rad/s")
-        print("\nPress '8' to stop.")
+        print(f"Height (i/k):   {self.height:.2f} m")
+        print(f"Jump (j):       {self.jump:.2f} m")
+        print("\nPress '8' to stop, 'r' to reset jump.")
 
 
 class KeyboardController:
@@ -63,9 +69,19 @@ class KeyboardController:
                 self.state.ang_z += 0.1
             elif key.char == "e":
                 self.state.ang_z -= 0.1
+            elif key.char == "i":
+                self.state.height += 0.02
+            elif key.char == "k":
+                self.state.height -= 0.02
+            elif key.char == "j":
+                self.state.jump = COMMAND.jump_range[1]
+            elif key.char == "r":
+                self.state.jump = 0.0
             elif key.char == "8":
                 self.state.stop = True
         except AttributeError:
+            if key == keyboard.Key.space:
+                self.state.jump = COMMAND.jump_range[1]
             return
 
         self.state.clamp()
