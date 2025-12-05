@@ -71,7 +71,7 @@ class ObservationConfig:
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    total_timesteps: int = 10_000_000
+    total_timesteps: int = 400_000
     n_steps: int = 24
     batch_size: int = 0
     n_epochs: int = 5
