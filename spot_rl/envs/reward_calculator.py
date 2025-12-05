@@ -45,18 +45,18 @@ class SpotRewardCalculator:
         for name, scale in self.reward_scales.items():
             rew_func = getattr(self, f"_reward_{name}")
             rew = rew_func(
-                commands,
-                base_lin_vel,
-                base_ang_vel,
-                base_pos,
-                base_quat,
-                dof_pos,
-                dof_vel,
-                default_dof_pos,
-                action,
-                last_action,
-                jump_toggled_buf,
-                jump_target_height,
+                commands=commands,
+                base_lin_vel=base_lin_vel,
+                base_ang_vel=base_ang_vel,
+                base_pos=base_pos,
+                base_quat=base_quat,
+                dof_pos=dof_pos,
+                dof_vel=dof_vel,
+                default_dof_pos=default_dof_pos,
+                action=action,
+                last_action=last_action,
+                jump_toggled_buf=jump_toggled_buf,
+                jump_target_height=jump_target_height,
             )
             scaled_rew = rew * scale
             reward += scaled_rew
@@ -82,7 +82,8 @@ class SpotRewardCalculator:
         return np.exp(-lin_vel_error / self.tracking_sigma)
 
     def _reward_tracking_ang_vel(self, commands, base_lin_vel, base_ang_vel, *args, **kwargs):
-        ang_vel_error = np.square(commands[2] - base_ang_vel[2] if len(base_ang_vel) > 2 else base_ang_vel[0])
+        ang_vel_z = base_ang_vel[2] if len(base_ang_vel) > 2 else base_ang_vel[0]
+        ang_vel_error = np.square(commands[2] - ang_vel_z)
         return np.exp(-ang_vel_error / self.tracking_sigma)
 
     def _reward_lin_vel_z(self, *args, base_lin_vel, jump_toggled_buf, **kwargs):

@@ -30,6 +30,8 @@ def main():
             "set_target_velocities",
             [keyboard_controller.state.lin_x, keyboard_controller.state.lin_y],
             keyboard_controller.state.ang_z,
+            keyboard_controller.state.height,
+            keyboard_controller.state.jump,
         )
 
         action, _ = model.predict(obs, deterministic=True)

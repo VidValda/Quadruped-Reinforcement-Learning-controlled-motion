@@ -148,8 +148,12 @@ class CustomSpotEnv(gym.Env):
         self.command_manager.enable_manual_control()
         print("Manual control enabled in Environment.")
 
-    def set_target_velocities(self, lin_vel, ang_vel):
+    def set_target_velocities(self, lin_vel, ang_vel, height=None, jump=None):
         self.command_manager.set_manual_targets(lin_vel, ang_vel)
+        if height is not None:
+            self.command_manager.commands[3] = np.clip(height, *COMMAND.height_range)
+        if jump is not None:
+            self.command_manager.commands[4] = np.clip(jump, *COMMAND.jump_range)
 
     @property
     def manual_control(self):
@@ -259,10 +263,6 @@ class CustomSpotEnv(gym.Env):
         time_out = self.episode_length > self.max_episode_length
         self.extras["time_outs"] = 1.0 if time_out else 0.0
 
-        if terminated:
-            obs, info = self.reset()
-            return obs, reward, terminated, truncated, info
-
         reward, reward_terminated, info = self.reward_calculator(
             self.data,
             self.actions,
@@ -291,6 +291,12 @@ class CustomSpotEnv(gym.Env):
         self.command_manager.commands[4] = 0.0
 
         truncated = False
+
+        if terminated:
+            obs, info = self.reset()
+            if self.render_mode == "human":
+                self.render()
+            return obs, reward, terminated, truncated, info
 
         if self.render_mode == "human":
             self.render()
