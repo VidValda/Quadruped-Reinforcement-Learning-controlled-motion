@@ -9,8 +9,8 @@ class SpotRewardCalculator:
         ang_vel_weight: float = 1.0,
         height_penalty_weight: float = 2.0,
         orientation_penalty_weight: float = 1.0,
-        action_rate_weight: float = 0.9,
-        control_cost_weight: float = 0.04,
+        action_rate_weight: float = 1,
+        control_cost_weight: float = 0.03,
         termination_height_threshold: float = 0.2,
         termination_reward: float = -10.0,
     ) -> None:
