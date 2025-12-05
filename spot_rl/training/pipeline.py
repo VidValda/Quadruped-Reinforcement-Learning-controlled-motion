@@ -4,6 +4,7 @@ import multiprocessing
 from pathlib import Path
 from typing import Tuple
 
+import torch.nn as nn
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
@@ -38,16 +39,32 @@ def build_visualization_env(render_mode: str = "human") -> VecNormalize:
 
 
 def create_model(env: VecNormalize) -> PPO:
+    policy_kwargs = TRAINING.policy_kwargs.copy() if TRAINING.policy_kwargs else {}
+    if 'activation_fn' in policy_kwargs and isinstance(policy_kwargs['activation_fn'], str):
+        activation_name = policy_kwargs.pop('activation_fn')
+        if activation_name == 'elu':
+            policy_kwargs['activation_fn'] = nn.ELU
+        else:
+            policy_kwargs['activation_fn'] = nn.ReLU
+    
+    batch_size = TRAINING.batch_size if TRAINING.batch_size > 0 else TRAINING.n_steps // 4
+    
     return PPO(
         "MlpPolicy",
         env,
         verbose=1,
         tensorboard_log=str(PATHS.tensorboard_log),
         n_steps=TRAINING.n_steps,
-        batch_size=TRAINING.batch_size,
+        batch_size=batch_size,
         n_epochs=TRAINING.n_epochs,
         learning_rate=TRAINING.learning_rate,
         gamma=TRAINING.gamma,
+        gae_lambda=TRAINING.gae_lambda,
+        clip_range=TRAINING.clip_range,
+        ent_coef=TRAINING.ent_coef,
+        vf_coef=TRAINING.vf_coef,
+        max_grad_norm=TRAINING.max_grad_norm,
+        policy_kwargs=policy_kwargs,
         device=TRAINING.device,
     )
 
