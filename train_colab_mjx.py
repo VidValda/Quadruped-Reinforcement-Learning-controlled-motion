@@ -367,31 +367,29 @@ class SpotModelLoader:
 
 def build_observation_mjx(data: mjx.Data, mj_model: mujoco.MjModel, torso_body_id: int, target_lin_vel, target_ang_vel: float) -> np.ndarray:
     """Build observation from MJX data."""
-    # Get body position and quaternion
+    # Get body position and quaternion (keep in JAX as long as possible)
     torso_xpos = data.xpos[torso_body_id]
     torso_quat = data.xquat[torso_body_id]
-    torso_z_pos = float(torso_xpos[2])
+    torso_z_pos = jnp.array(torso_xpos[2])
     
-    # Convert quaternion to numpy for roll/pitch calculation
+    # Convert quaternion to numpy for roll/pitch calculation (quat_to_roll_pitch uses numpy)
     quat_np = np.array(torso_quat)
     roll, pitch = quat_to_roll_pitch(quat_np)
-    pitch_roll = np.array([pitch, roll])
+    pitch_roll = jnp.array([pitch, roll])
 
-    # Convert JAX arrays to numpy
-    qpos = np.array(data.qpos)
-    qvel = np.array(data.qvel)
-
-    return np.concatenate(
-        [
-            qpos[7:],
-            qvel[6:],
-            qvel[0:6],
-            np.array([torso_z_pos]),
-            pitch_roll,
-            target_lin_vel,
-            np.array([target_ang_vel]),
-        ]
-    ).astype(np.float32)
+    # Build observation in JAX, then convert to numpy once at the end
+    obs = jnp.concatenate([
+        data.qpos[7:],
+        data.qvel[6:],
+        data.qvel[0:6],
+        jnp.array([torso_z_pos]),
+        pitch_roll,
+        jnp.array(target_lin_vel),
+        jnp.array([target_ang_vel]),
+    ])
+    
+    # Single GPU→CPU transfer
+    return jax.device_get(obs).astype(np.float32)
 
 
 # ============================================================================
@@ -425,9 +423,16 @@ class SpotRewardCalculatorMJX:
     def __call__(self, data: mjx.Data, mj_model: mujoco.MjModel, action, last_action, target_lin_vel, target_ang_vel, torso_body_id: int):
         """Calculate reward from MJX data."""
         # Get body velocities and position
-        torso_cvel = data.cvel[torso_body_id]
-        current_lin_vel = np.array(torso_cvel[3:5])  # Linear velocity in x, y
-        current_ang_vel = float(torso_cvel[2])  # Angular velocity around z
+        # Use cvel if available, otherwise fall back to xvel
+        if hasattr(data, 'cvel') and data.cvel.shape[0] > torso_body_id:
+            torso_cvel = data.cvel[torso_body_id]
+            current_lin_vel = np.array(torso_cvel[3:5])  # Linear velocity in x, y
+            current_ang_vel = float(torso_cvel[2])  # Angular velocity around z
+        else:
+            # Fallback: compute from xvel
+            torso_xvel = data.xvel[torso_body_id]
+            current_lin_vel = np.array(torso_xvel[3:5])  # Linear velocity in x, y
+            current_ang_vel = float(torso_xvel[2])  # Angular velocity around z
         
         torso_xpos = data.xpos[torso_body_id]
         torso_z_pos = float(torso_xpos[2])
@@ -490,6 +495,12 @@ class CustomSpotEnvMJX(gym.Env):
         self.mj_model = loader.build_mj_model()  # Regular MuJoCo model for reference
         self.mjx_model = loader.build_mjx_model()  # MJX model for GPU computation
         self.data = mjx.make_data(self.mjx_model)
+        
+        # JIT compile the step function for performance
+        # Note: We create a closure to capture the model
+        def step_fn(data):
+            return mjx.step(self.mjx_model, data)
+        self.jit_step = jax.jit(step_fn)
 
         self.frame_skip = SimulationConfig.frame_skip
         self.dt = self.frame_skip * self.mj_model.opt.timestep
@@ -563,6 +574,9 @@ class CustomSpotEnvMJX(gym.Env):
         # Initialize robot in homing pose
         if len(self.default_homing_pose) == self.mj_model.nu:
             qpos = np.array(self.data.qpos)
+            # Ensure root position is at reasonable height
+            qpos[2] = self.target_height  # z position
+            # Set joint positions
             qpos[7:] = self.default_homing_pose
             self.data = self.data.replace(qpos=jnp.array(qpos))
             
@@ -592,9 +606,9 @@ class CustomSpotEnvMJX(gym.Env):
         # Set control
         self.data = self.data.replace(ctrl=jnp.array(final_action_clipped))
 
-        # Step simulation with frame_skip
+        # Step simulation with frame_skip (using JIT-compiled step)
         for _ in range(self.frame_skip):
-            self.data = mjx.step(self.mjx_model, self.data)
+            self.data = self.jit_step(self.data)
         
         self.command_manager.step()
 
@@ -649,6 +663,14 @@ class CustomSpotEnvMJX(gym.Env):
 
 
 def make_env(render_mode: Optional[str] = None):
+    """Create environment with proper JAX initialization."""
+    # Ensure JAX is properly initialized (important for multiprocessing)
+    # This is a no-op if already initialized, but ensures subprocesses have JAX ready
+    try:
+        _ = jax.devices()
+    except Exception:
+        pass  # JAX will initialize on first use
+    
     env = CustomSpotEnvMJX(render_mode=render_mode)
     env = gym.wrappers.TimeLimit(env, max_episode_steps=SimulationConfig.max_episode_steps)
     return env
@@ -664,9 +686,35 @@ def build_training_env(num_envs: Optional[int] = None) -> VecNormalize:
     if num_envs is None:
         num_envs = multiprocessing.cpu_count()
     
-    print(f"Creating {num_envs} parallel environments with MJX (GPU-accelerated)...")
-    env_fns = [lambda: make_env(render_mode=None) for _ in range(num_envs)]
-    env = SubprocVecEnv(env_fns)
+    # Detect if we're in Colab/Kaggle
+    in_colab = os.path.exists("/content") or os.getenv("COLAB_GPU") is not None
+    in_kaggle = os.path.exists("/kaggle") or os.getenv("KAGGLE_KERNEL_RUN_TYPE") is not None
+    
+    # Use DummyVecEnv for single environment or when in Colab/Kaggle (JAX multiprocessing issues)
+    # SubprocVecEnv can cause deadlocks with JAX/MJX in cloud environments
+    # Also use DummyVecEnv if num_envs is 1 (no benefit from multiprocessing)
+    use_subproc = num_envs > 1 and not in_colab and not in_kaggle
+    
+    if use_subproc:
+        print(f"Creating {num_envs} parallel environments with MJX (GPU-accelerated) using SubprocVecEnv...")
+        def make_env_fn():
+            return make_env(render_mode=None)
+        env_fns = [make_env_fn for _ in range(num_envs)]
+        env = SubprocVecEnv(env_fns)
+    else:
+        vec_env_type = "DummyVecEnv"
+        if in_colab:
+            vec_env_type += " (Colab detected)"
+        elif in_kaggle:
+            vec_env_type += " (Kaggle detected)"
+        elif num_envs == 1:
+            vec_env_type += " (single environment)"
+        print(f"Creating {num_envs} parallel environments with MJX (GPU-accelerated) using {vec_env_type}...")
+        def make_env_fn():
+            return make_env(render_mode=None)
+        env_fns = [make_env_fn for _ in range(num_envs)]
+        env = DummyVecEnv(env_fns)
+    
     env = VecNormalize(env, norm_obs=True, norm_reward=True, gamma=TrainingConfig.gamma)
     return env
 
