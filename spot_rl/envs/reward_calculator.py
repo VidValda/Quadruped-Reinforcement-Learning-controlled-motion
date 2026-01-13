@@ -12,8 +12,8 @@ class SpotRewardCalculator:
         height_penalty_weight: float = 2.0,
         orientation_penalty_weight: float = 1.0,
         action_rate_weight: float = 1,
-        control_cost_weight: float = 0.03,
-        termination_height_threshold: float = 0.2,
+        control_cost_weight: float = 0.05,
+        termination_height_threshold: float = 0.35,
         termination_reward: float = -10.0,
     ) -> None:
         self.target_height = target_height

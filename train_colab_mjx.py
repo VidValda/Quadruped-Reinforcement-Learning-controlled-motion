@@ -367,29 +367,28 @@ class SpotModelLoader:
 
 def build_observation_mjx(data: mjx.Data, mj_model: mujoco.MjModel, torso_body_id: int, target_lin_vel, target_ang_vel: float) -> np.ndarray:
     """Build observation from MJX data."""
-    # Get body position and quaternion (keep in JAX as long as possible)
-    torso_xpos = data.xpos[torso_body_id]
-    torso_quat = data.xquat[torso_body_id]
-    torso_z_pos = jnp.array(torso_xpos[2])
+    # Convert JAX arrays to numpy immediately to avoid blocking issues
+    # This is less efficient but more reliable
+    qpos = np.array(data.qpos)
+    qvel = np.array(data.qvel)
+    torso_xpos = np.array(data.xpos[torso_body_id])
+    torso_quat = np.array(data.xquat[torso_body_id])
     
-    # Convert quaternion to numpy for roll/pitch calculation (quat_to_roll_pitch uses numpy)
-    quat_np = np.array(torso_quat)
-    roll, pitch = quat_to_roll_pitch(quat_np)
-    pitch_roll = jnp.array([pitch, roll])
-
-    # Build observation in JAX, then convert to numpy once at the end
-    obs = jnp.concatenate([
-        data.qpos[7:],
-        data.qvel[6:],
-        data.qvel[0:6],
-        jnp.array([torso_z_pos]),
-        pitch_roll,
-        jnp.array(target_lin_vel),
-        jnp.array([target_ang_vel]),
-    ])
+    torso_z_pos = float(torso_xpos[2])
+    roll, pitch = quat_to_roll_pitch(torso_quat)
     
-    # Single GPU→CPU transfer
-    return jax.device_get(obs).astype(np.float32)
+    # Build observation in numpy
+    obs = np.concatenate([
+        qpos[7:],
+        qvel[6:],
+        qvel[0:6],
+        np.array([torso_z_pos]),
+        np.array([pitch, roll]),
+        np.array(target_lin_vel),
+        np.array([target_ang_vel]),
+    ]).astype(np.float32)
+    
+    return obs
 
 
 # ============================================================================
@@ -635,12 +634,16 @@ class CustomSpotEnvMJX(gym.Env):
         final_action = self.default_homing_pose + action
         final_action_clipped = np.clip(final_action, -2 * np.pi, 2 * np.pi)
         
-        # Set control
-        self.data = self.data.replace(ctrl=jnp.array(final_action_clipped))
+        # Set control - ensure we convert to JAX array properly
+        self.data = self.data.replace(ctrl=jnp.array(final_action_clipped, dtype=jnp.float32))
 
         # Step simulation with frame_skip (using JIT-compiled step)
-        for _ in range(self.frame_skip):
+        # Force synchronization after each step to avoid blocking
+        for i in range(self.frame_skip):
             self.data = self.jit_step(self.data)
+            # Force synchronization every few steps to avoid long blocking
+            if i % 2 == 0:
+                _ = jax.block_until_ready(self.data.qpos)
         
         self.command_manager.step()
 
@@ -847,8 +850,46 @@ def train(
     
     # Train
     print("\nStarting training with GPU-accelerated MJX environments...")
-    print("(First iteration may take longer due to JIT compilation)\n")
-    model.learn(total_timesteps=total_timesteps)
+    print(f"Collecting first batch of {n_steps} steps (this may take 2-5 minutes)...")
+    print("(Subsequent iterations will be much faster)\n")
+    
+    # Add a callback to show progress and debug hanging
+    from stable_baselines3.common.callbacks import BaseCallback
+    import time
+    
+    class ProgressCallback(BaseCallback):
+        def __init__(self, verbose=0):
+            super().__init__(verbose)
+            self.first_update = True
+            self.step_count = 0
+            self.last_print_time = time.time()
+            self.start_time = time.time()
+        
+        def _on_step(self) -> bool:
+            self.step_count += 1
+            current_time = time.time()
+            
+            # Print progress every 100 steps or every 30 seconds
+            if self.step_count % 100 == 0 or (current_time - self.last_print_time) > 30:
+                elapsed = current_time - self.start_time
+                print(f"  Progress: {self.step_count}/{n_steps} steps collected ({elapsed:.1f}s elapsed)", flush=True)
+                self.last_print_time = current_time
+            
+            return True
+        
+        def _on_rollout_end(self) -> None:
+            if self.first_update:
+                elapsed = time.time() - self.start_time
+                print(f"✓ First batch collected in {elapsed:.1f}s! Training updates starting...\n", flush=True)
+                self.first_update = False
+    
+    callback = ProgressCallback()
+    
+    # Add timeout protection
+    print("Note: If this hangs for more than 10 minutes, there may be a JAX/GPU synchronization issue.")
+    print("      Try reducing n_steps or using the non-MJX version (train_colab.py)\n")
+    
+    model.learn(total_timesteps=total_timesteps, callback=callback)
     
     # Save model and stats
     model_path = os.path.join(output_dir, f"{model_name}.zip")
