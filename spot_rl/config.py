@@ -16,13 +16,13 @@ class CommandConfig:
 @dataclass(frozen=True)
 class SimulationConfig:
     frame_skip: int = 5
-    target_height: float = 0.35
+    target_height: float = 0.5
     max_episode_steps: int = 2000
 
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    total_timesteps: int = 30_000_000
+    total_timesteps: int = 10_000_000
     n_steps: int = 1024
     batch_size: int = 4096
     n_epochs: int = 10
