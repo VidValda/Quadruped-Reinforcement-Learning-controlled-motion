@@ -601,7 +601,9 @@ def build_training_env(num_envs: Optional[int] = None) -> VecNormalize:
         num_envs = multiprocessing.cpu_count()
     
     print(f"Creating {num_envs} parallel environments...")
-    env_fns = [lambda: make_env(render_mode=None) for _ in range(num_envs)]
+    def make_env_fn():
+        return make_env(render_mode=None)
+    env_fns = [make_env_fn for _ in range(num_envs)]
     env = SubprocVecEnv(env_fns)
     env = VecNormalize(env, norm_obs=True, norm_reward=True, gamma=TrainingConfig.gamma)
     return env
