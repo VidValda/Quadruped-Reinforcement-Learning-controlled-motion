@@ -209,13 +209,25 @@ class SpotModelLoader:
             xml_path = Path(spot_mj_description.MJCF_PATH)
             with xml_path.open("r", encoding="utf-8") as file:
                 return file.read()
-        except (ValueError, AttributeError, ImportError) as e:
+        except (ValueError, AttributeError, ImportError, RuntimeError) as e:
             # Handle git branch issue (master vs main) or import errors
             error_str = str(e)
-            if "refs/heads/master" in error_str or "Reference" in error_str or "spot_mj_description" in error_str:
-                print("⚠ robot_descriptions issue detected. Using direct download fallback...")
+            error_type = type(e).__name__
+            # Check for various git/repository errors
+            git_related_keywords = [
+                "refs/heads/master", "refs/heads/main", "Reference", 
+                "spot_mj_description", "does not exist", "clone",
+                "git", "repository", "hexsha", "dereference"
+            ]
+            if any(keyword in error_str for keyword in git_related_keywords):
+                print(f"⚠ robot_descriptions issue detected ({error_type}): {error_str[:150]}...")
+                print("Using direct download fallback...")
                 return SpotModelLoader._load_mjcf_direct()
             else:
+                # For other errors, try fallback anyway if it's an import/attribute error
+                if error_type in ["ImportError", "AttributeError"]:
+                    print(f"⚠ robot_descriptions import issue ({error_type}), using fallback...")
+                    return SpotModelLoader._load_mjcf_direct()
                 raise
     
     @staticmethod
@@ -253,12 +265,50 @@ class SpotModelLoader:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(cache_dir)
             
+            # Try the expected path first
             if spot_xml.exists():
                 print("✓ Successfully downloaded and cached Spot XML")
                 with spot_xml.open("r", encoding="utf-8") as file:
                     return file.read()
-            else:
-                raise FileNotFoundError(f"Could not find spot.xml in {extracted_dir}")
+            
+            # If not found, search recursively for spot.xml
+            print(f"⚠ spot.xml not found at expected path, searching in {extracted_dir}...")
+            spot_xml_files = list(extracted_dir.rglob("spot.xml"))
+            
+            if spot_xml_files:
+                spot_xml = spot_xml_files[0]
+                print(f"✓ Found spot.xml at: {spot_xml}")
+                with spot_xml.open("r", encoding="utf-8") as file:
+                    return file.read()
+            
+            # If still not found, try alternative: download directly from raw GitHub
+            print("⚠ Trying direct download from GitHub raw...")
+            raw_url = "https://raw.githubusercontent.com/deepmind/mujoco_menagerie/main/spot/spot.xml"
+            spot_xml_direct = cache_dir / "spot.xml"
+            try:
+                urllib.request.urlretrieve(raw_url, spot_xml_direct)
+                if spot_xml_direct.exists():
+                    print("✓ Successfully downloaded Spot XML directly")
+                    with spot_xml_direct.open("r", encoding="utf-8") as file:
+                        return file.read()
+            except Exception as direct_e:
+                print(f"⚠ Direct download also failed: {direct_e}")
+            
+            # Last resort: list what's actually in the extracted directory
+            if extracted_dir.exists():
+                print(f"Contents of {extracted_dir}:")
+                for item in extracted_dir.iterdir():
+                    print(f"  - {item.name} ({'dir' if item.is_dir() else 'file'})")
+                    if item.is_dir() and item.name == "spot":
+                        print(f"    Contents of spot/:")
+                        for subitem in item.iterdir():
+                            print(f"      - {subitem.name}")
+            
+            raise FileNotFoundError(
+                f"Could not find spot.xml in {extracted_dir}. "
+                f"Searched recursively and tried direct download. "
+                f"Please check your internet connection and the repository structure."
+            )
         except Exception as e:
             raise RuntimeError(f"Failed to load Spot XML: {e}. Please check your internet connection.")
 
