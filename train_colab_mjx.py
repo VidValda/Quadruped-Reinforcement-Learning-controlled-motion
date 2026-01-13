@@ -1,5 +1,5 @@
 """
-Standalone training script for Google Colab / Kaggle with GPU support using MuJoCo MJX.
+Standalone training script for Google Colab / Kaggle / GCP with GPU support using MuJoCo MJX.
 MJX is a JAX-based GPU-accelerated version of MuJoCo that significantly speeds up environment simulation.
 
 Usage in Colab:
@@ -7,6 +7,9 @@ Usage in Colab:
 
 Usage in Kaggle:
     python train_colab_mjx.py --total_timesteps 10000000 --model_name ppo_spot_mjx
+
+Usage on GCP GPU instance:
+    python train_colab_mjx.py --total_timesteps 30000000 --model_name ppo_spot_mjx_gcp --device cuda --num_envs 8
 """
 
 from __future__ import annotations
@@ -721,12 +724,14 @@ def build_training_env(num_envs: Optional[int] = None) -> VecNormalize:
     if num_envs is None:
         num_envs = multiprocessing.cpu_count()
     
-    # Detect if we're in Colab/Kaggle
+    # Detect if we're in Colab/Kaggle/GCP
     in_colab = os.path.exists("/content") or os.getenv("COLAB_GPU") is not None
     in_kaggle = os.path.exists("/kaggle") or os.getenv("KAGGLE_KERNEL_RUN_TYPE") is not None
+    in_gcp = os.path.exists("/sys/class/dmi/id/product_name") and "Google" in open("/sys/class/dmi/id/product_name").read() if os.path.exists("/sys/class/dmi/id/product_name") else False
     
     # Use DummyVecEnv for single environment or when in Colab/Kaggle (JAX multiprocessing issues)
     # SubprocVecEnv can cause deadlocks with JAX/MJX in cloud environments
+    # GCP instances can use SubprocVecEnv if num_envs > 1 (more stable than Colab)
     # Also use DummyVecEnv if num_envs is 1 (no benefit from multiprocessing)
     use_subproc = num_envs > 1 and not in_colab and not in_kaggle
     
@@ -742,6 +747,8 @@ def build_training_env(num_envs: Optional[int] = None) -> VecNormalize:
             vec_env_type += " (Colab detected)"
         elif in_kaggle:
             vec_env_type += " (Kaggle detected)"
+        elif in_gcp:
+            vec_env_type += " (GCP detected)"
         elif num_envs == 1:
             vec_env_type += " (single environment)"
         print(f"Creating {num_envs} parallel environments with MJX (GPU-accelerated) using {vec_env_type}...")
