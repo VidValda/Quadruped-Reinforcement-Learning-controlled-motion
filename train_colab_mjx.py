@@ -222,31 +222,43 @@ class SpotModelLoader:
     def _load_mjcf_direct() -> str:
         """Direct download fallback when robot_descriptions fails."""
         import urllib.request
-        import tempfile
         import zipfile
+        import shutil
+        
+        # Use a persistent cache directory
+        cache_dir = Path.home() / ".cache" / "mujoco_menagerie"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        extracted_dir = cache_dir / "mujoco_menagerie-main"
+        spot_xml = extracted_dir / "spot" / "spot.xml"
+        
+        # Check if already cached
+        if spot_xml.exists():
+            print("✓ Using cached Spot XML")
+            with spot_xml.open("r", encoding="utf-8") as file:
+                return file.read()
         
         # URL to the spot XML file in mujoco_menagerie
         repo_url = "https://github.com/deepmind/mujoco_menagerie/archive/refs/heads/main.zip"
+        zip_path = cache_dir / "menagerie.zip"
         
         try:
             print("Downloading Spot XML from mujoco_menagerie...")
-            with tempfile.TemporaryDirectory() as tmpdir:
-                zip_path = Path(tmpdir) / "menagerie.zip"
-                urllib.request.urlretrieve(repo_url, zip_path)
-                
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(tmpdir)
-                
-                # Find spot XML file
-                extracted_dir = Path(tmpdir) / "mujoco_menagerie-main"
-                spot_xml = extracted_dir / "spot" / "spot.xml"
-                
-                if spot_xml.exists():
-                    print("✓ Successfully loaded Spot XML")
-                    with spot_xml.open("r", encoding="utf-8") as file:
-                        return file.read()
-                else:
-                    raise FileNotFoundError(f"Could not find spot.xml in {extracted_dir}")
+            urllib.request.urlretrieve(repo_url, zip_path)
+            
+            # Remove old extraction if exists
+            if extracted_dir.exists():
+                shutil.rmtree(extracted_dir)
+            
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(cache_dir)
+            
+            if spot_xml.exists():
+                print("✓ Successfully downloaded and cached Spot XML")
+                with spot_xml.open("r", encoding="utf-8") as file:
+                    return file.read()
+            else:
+                raise FileNotFoundError(f"Could not find spot.xml in {extracted_dir}")
         except Exception as e:
             raise RuntimeError(f"Failed to load Spot XML: {e}. Please check your internet connection.")
 
@@ -255,15 +267,10 @@ class SpotModelLoader:
             from robot_descriptions import spot_mj_description
             xml_path = Path(spot_mj_description.MJCF_PATH)
             xml_dir = xml_path.parent
-        except (ValueError, AttributeError):
-            # If robot_descriptions failed, try to infer path from cache
-            try:
-                from robot_descriptions._cache import get_cache_dir
-                cache_dir = Path(get_cache_dir())
-                xml_dir = cache_dir / "mujoco_menagerie" / "spot"
-            except:
-                # Last resort: use relative path
-                xml_dir = Path(".")
+        except (ValueError, AttributeError, ImportError):
+            # If robot_descriptions failed, use our cache directory
+            cache_dir = Path.home() / ".cache" / "mujoco_menagerie" / "mujoco_menagerie-main"
+            xml_dir = cache_dir / "spot"
         
         assets_dir = os.path.abspath(xml_dir / self.assets_subdir).replace("\\", "/")
 

@@ -185,15 +185,74 @@ class SpotModelLoader:
 
     @staticmethod
     def _load_mjcf() -> str:
-        from robot_descriptions import spot_mj_description
-        xml_path = Path(spot_mj_description.MJCF_PATH)
-        with xml_path.open("r", encoding="utf-8") as file:
-            return file.read()
+        try:
+            from robot_descriptions import spot_mj_description
+            xml_path = Path(spot_mj_description.MJCF_PATH)
+            with xml_path.open("r", encoding="utf-8") as file:
+                return file.read()
+        except (ValueError, AttributeError, ImportError) as e:
+            # Handle git branch issue (master vs main) or import errors
+            error_str = str(e)
+            if "refs/heads/master" in error_str or "Reference" in error_str or "spot_mj_description" in error_str:
+                print("⚠ robot_descriptions issue detected. Using direct download fallback...")
+                return SpotModelLoader._load_mjcf_direct()
+            else:
+                raise
+    
+    @staticmethod
+    def _load_mjcf_direct() -> str:
+        """Direct download fallback when robot_descriptions fails."""
+        import urllib.request
+        import zipfile
+        import shutil
+        
+        # Use a persistent cache directory
+        cache_dir = Path.home() / ".cache" / "mujoco_menagerie"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        extracted_dir = cache_dir / "mujoco_menagerie-main"
+        spot_xml = extracted_dir / "spot" / "spot.xml"
+        
+        # Check if already cached
+        if spot_xml.exists():
+            print("✓ Using cached Spot XML")
+            with spot_xml.open("r", encoding="utf-8") as file:
+                return file.read()
+        
+        # URL to the spot XML file in mujoco_menagerie
+        repo_url = "https://github.com/deepmind/mujoco_menagerie/archive/refs/heads/main.zip"
+        zip_path = cache_dir / "menagerie.zip"
+        
+        try:
+            print("Downloading Spot XML from mujoco_menagerie...")
+            urllib.request.urlretrieve(repo_url, zip_path)
+            
+            # Remove old extraction if exists
+            if extracted_dir.exists():
+                shutil.rmtree(extracted_dir)
+            
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(cache_dir)
+            
+            if spot_xml.exists():
+                print("✓ Successfully downloaded and cached Spot XML")
+                with spot_xml.open("r", encoding="utf-8") as file:
+                    return file.read()
+            else:
+                raise FileNotFoundError(f"Could not find spot.xml in {extracted_dir}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load Spot XML: {e}. Please check your internet connection.")
 
     def _ensure_mesh_paths(self, xml_string: str) -> str:
-        from robot_descriptions import spot_mj_description
-        xml_path = Path(spot_mj_description.MJCF_PATH)
-        xml_dir = xml_path.parent
+        try:
+            from robot_descriptions import spot_mj_description
+            xml_path = Path(spot_mj_description.MJCF_PATH)
+            xml_dir = xml_path.parent
+        except (ValueError, AttributeError, ImportError):
+            # If robot_descriptions failed, use our cache directory
+            cache_dir = Path.home() / ".cache" / "mujoco_menagerie" / "mujoco_menagerie-main"
+            xml_dir = cache_dir / "spot"
+        
         assets_dir = os.path.abspath(xml_dir / self.assets_subdir).replace("\\", "/")
 
         if 'meshdir="assets"' in xml_string:
