@@ -487,20 +487,23 @@ class SpotRewardCalculatorMJX:
 class CustomSpotEnvMJX(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, render_mode: Optional[str] = None):
+    def __init__(self, render_mode: Optional[str] = None, verbose: bool = False):
         super().__init__()
 
         # Load models
+        if verbose:
+            print("Loading MuJoCo model...", end=" ", flush=True)
         loader = SpotModelLoader()
         self.mj_model = loader.build_mj_model()  # Regular MuJoCo model for reference
+        if verbose:
+            print("✓", flush=True)
+        
+        if verbose:
+            print("Building MJX model...", end=" ", flush=True)
         self.mjx_model = loader.build_mjx_model()  # MJX model for GPU computation
         self.data = mjx.make_data(self.mjx_model)
-        
-        # JIT compile the step function for performance
-        # Note: We create a closure to capture the model
-        def step_fn(data):
-            return mjx.step(self.mjx_model, data)
-        self.jit_step = jax.jit(step_fn)
+        if verbose:
+            print("✓", flush=True)
 
         self.frame_skip = SimulationConfig.frame_skip
         self.dt = self.frame_skip * self.mj_model.opt.timestep
@@ -530,6 +533,35 @@ class CustomSpotEnvMJX(gym.Env):
         )
 
         self.target_height = SimulationConfig.target_height
+        
+        # JIT compile the step function for performance
+        # Note: We create a closure to capture the model
+        if verbose:
+            print("JIT compiling step function (this may take 30-60 seconds)...", end=" ", flush=True)
+        def step_fn(data):
+            return mjx.step(self.mjx_model, data)
+        self.jit_step = jax.jit(step_fn)
+        
+        # Pre-compile the JIT function to avoid hanging on first use
+        # This triggers compilation now rather than on first step()
+        # Use a fresh, properly initialized data object for compilation
+        try:
+            compile_data = mjx.make_data(self.mjx_model)
+            # Initialize with default pose for compilation
+            qpos_init = np.array(compile_data.qpos)
+            qpos_init[2] = self.target_height  # z position
+            qpos_init[7:] = self.default_homing_pose
+            compile_data = compile_data.replace(qpos=jnp.array(qpos_init))
+            compile_data = compile_data.replace(ctrl=jnp.array(self.default_homing_pose))
+            compile_data = mjx.forward(self.mjx_model, compile_data)
+            
+            # Now compile - this will take time but happens here instead of during training
+            _ = self.jit_step(compile_data)
+            if verbose:
+                print("✓ (compilation complete)", flush=True)
+        except Exception as e:
+            if verbose:
+                print(f"⚠ (compilation will happen on first step): {e}", flush=True)
         self.last_action = np.zeros(self.mj_model.nu, dtype=np.float32)
 
         command_config = CommandConfig(
@@ -662,7 +694,7 @@ class CustomSpotEnvMJX(gym.Env):
             self.viewer = None
 
 
-def make_env(render_mode: Optional[str] = None):
+def make_env(render_mode: Optional[str] = None, env_id: int = 0, verbose: bool = False):
     """Create environment with proper JAX initialization."""
     # Ensure JAX is properly initialized (important for multiprocessing)
     # This is a no-op if already initialized, but ensures subprocesses have JAX ready
@@ -671,7 +703,7 @@ def make_env(render_mode: Optional[str] = None):
     except Exception:
         pass  # JAX will initialize on first use
     
-    env = CustomSpotEnvMJX(render_mode=render_mode)
+    env = CustomSpotEnvMJX(render_mode=render_mode, verbose=verbose)
     env = gym.wrappers.TimeLimit(env, max_episode_steps=SimulationConfig.max_episode_steps)
     return env
 
@@ -710,9 +742,20 @@ def build_training_env(num_envs: Optional[int] = None) -> VecNormalize:
         elif num_envs == 1:
             vec_env_type += " (single environment)"
         print(f"Creating {num_envs} parallel environments with MJX (GPU-accelerated) using {vec_env_type}...")
-        def make_env_fn():
-            return make_env(render_mode=None)
-        env_fns = [make_env_fn for _ in range(num_envs)]
+        
+        # Create environments one by one with progress indication
+        env_fns = []
+        for i in range(num_envs):
+            if num_envs > 1:
+                print(f"  Initializing environment {i+1}/{num_envs}...", end=" ", flush=True)
+            # Use default argument to capture i correctly
+            # Only verbose for first environment to avoid spam
+            def make_env_fn(env_idx=i):
+                return make_env(render_mode=None, env_id=env_idx, verbose=(env_idx == 0))
+            env_fns.append(make_env_fn)
+            if num_envs > 1:
+                print("✓", flush=True)
+        
         env = DummyVecEnv(env_fns)
     
     env = VecNormalize(env, norm_obs=True, norm_reward=True, gamma=TrainingConfig.gamma)
@@ -774,9 +817,12 @@ def train(
         os.makedirs(tensorboard_log, exist_ok=True)
     
     # Build environment
+    print("\nBuilding training environment...")
     env = build_training_env(num_envs=num_envs)
+    print("✓ Environment ready\n")
     
     # Create model
+    print("Creating PPO model...", end=" ", flush=True)
     model = create_model(
         env,
         device=device,
@@ -786,9 +832,22 @@ def train(
         n_epochs=n_epochs,
         learning_rate=learning_rate,
     )
+    print("✓", flush=True)
+    
+    # Test environment before training (this will trigger any remaining JIT compilation)
+    # This helps identify issues early and pre-compiles JIT functions
+    print("Testing environment (this may take a moment for JIT compilation)...", end=" ", flush=True)
+    try:
+        obs = env.reset()
+        # Just test reset, don't test step to avoid double compilation
+        print("✓", flush=True)
+    except Exception as e:
+        print(f"⚠ Warning during test: {e}", flush=True)
+        print("  (Continuing anyway - this may be normal)", flush=True)
     
     # Train
     print("\nStarting training with GPU-accelerated MJX environments...")
+    print("(First iteration may take longer due to JIT compilation)\n")
     model.learn(total_timesteps=total_timesteps)
     
     # Save model and stats
