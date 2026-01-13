@@ -729,11 +729,12 @@ def build_training_env(num_envs: Optional[int] = None) -> VecNormalize:
     in_kaggle = os.path.exists("/kaggle") or os.getenv("KAGGLE_KERNEL_RUN_TYPE") is not None
     in_gcp = os.path.exists("/sys/class/dmi/id/product_name") and "Google" in open("/sys/class/dmi/id/product_name").read() if os.path.exists("/sys/class/dmi/id/product_name") else False
     
-    # Use DummyVecEnv for single environment or when in Colab/Kaggle (JAX multiprocessing issues)
+    # Use DummyVecEnv for single environment or when in Colab/Kaggle/GCP (JAX multiprocessing issues)
     # SubprocVecEnv can cause deadlocks with JAX/MJX in cloud environments
-    # GCP instances can use SubprocVecEnv if num_envs > 1 (more stable than Colab)
+    # IMPORTANT: On GCP with MJX, SubprocVecEnv causes GPU OOM because each subprocess uses GPU memory
+    # DummyVecEnv shares GPU memory better for MJX environments
     # Also use DummyVecEnv if num_envs is 1 (no benefit from multiprocessing)
-    use_subproc = num_envs > 1 and not in_colab and not in_kaggle
+    use_subproc = num_envs > 1 and not in_colab and not in_kaggle and not in_gcp
     
     if use_subproc:
         print(f"Creating {num_envs} parallel environments with MJX (GPU-accelerated) using SubprocVecEnv...")
@@ -830,6 +831,18 @@ def train(
     print("\nBuilding training environment...")
     env = build_training_env(num_envs=num_envs)
     print("✓ Environment ready\n")
+    
+    # Clear JAX memory cache to free up GPU memory for PPO
+    if device == "cuda":
+        print("Clearing JAX memory cache...", end=" ", flush=True)
+        try:
+            jax.clear_backends()
+            # Force garbage collection
+            import gc
+            gc.collect()
+            print("✓", flush=True)
+        except Exception as e:
+            print(f"⚠ (continuing anyway): {e}", flush=True)
     
     # Create model
     print("Creating PPO model...", end=" ", flush=True)
@@ -992,12 +1005,20 @@ def main():
     args = parser.parse_args()
     
     # Detect device for PPO (separate from MJX which uses JAX/GPU)
+    # Note: With MJX using GPU, it's often better to use CPU for PPO to avoid GPU OOM
     if args.device is None or args.device == "auto":
         try:
             import torch
             if torch.cuda.is_available():
-                device = "cuda"
-                print(f"✓ PPO will use GPU: {torch.cuda.get_device_name(0)}")
+                # Check GPU memory availability
+                gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+                # If GPU memory is limited (< 20GB) or using many envs, use CPU for PPO
+                if gpu_memory_gb < 20 or (args.num_envs and args.num_envs > 2):
+                    device = "cpu"
+                    print(f"⚠ PPO will use CPU (GPU has {gpu_memory_gb:.1f}GB, MJX environments use GPU)")
+                else:
+                    device = "cuda"
+                    print(f"✓ PPO will use GPU: {torch.cuda.get_device_name(0)} ({gpu_memory_gb:.1f}GB)")
             else:
                 device = "cpu"
                 print("⚠ PPO will use CPU (MJX environments still run on GPU)")
