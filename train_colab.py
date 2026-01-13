@@ -24,6 +24,7 @@ import mujoco
 import numpy as np
 from gymnasium import spaces
 from stable_baselines3 import PPO
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 # ============================================================================
@@ -595,15 +596,36 @@ def make_env(render_mode: Optional[str] = None):
 # ============================================================================
 
 
-def build_training_env(num_envs: Optional[int] = None) -> VecNormalize:
+def build_training_env(num_envs: Optional[int] = None, tensorboard_log: Optional[str] = None) -> VecNormalize:
     """Build vectorized training environment."""
     if num_envs is None:
         num_envs = multiprocessing.cpu_count()
     
     print(f"Creating {num_envs} parallel environments...")
-    def make_env_fn():
-        return make_env(render_mode=None)
-    env_fns = [make_env_fn for _ in range(num_envs)]
+    
+    def make_env_fn(rank: int):
+        """Create a single environment wrapped with Monitor for TensorBoard logging."""
+        env = make_env(render_mode=None)
+        # Monitor wrapper is essential for logging rollout metrics like ep_rew_mean
+        # It collects episode rewards and lengths for TensorBoard
+        if tensorboard_log:
+            # Create a unique log directory for each environment
+            # Monitor needs a directory to write episode stats that PPO will read
+            log_dir = os.path.join(tensorboard_log, f"monitor_env_{rank}")
+            os.makedirs(log_dir, exist_ok=True)
+            env = Monitor(env, log_dir, allow_early_resets=True)
+        # If no tensorboard_log, don't wrap with Monitor
+        # PPO will still work but won't log rollout metrics to TensorBoard
+        return env
+    
+    # Create environment factory functions for each rank
+    # Use default argument to properly capture rank value for multiprocessing
+    env_fns = []
+    for i in range(num_envs):
+        def _make_env(rank=i):
+            return make_env_fn(rank)
+        env_fns.append(_make_env)
+    
     env = SubprocVecEnv(env_fns)
     env = VecNormalize(env, norm_obs=True, norm_reward=True, gamma=TrainingConfig.gamma)
     return env
@@ -661,8 +683,8 @@ def train(
     if tensorboard_log:
         os.makedirs(tensorboard_log, exist_ok=True)
     
-    # Build environment
-    env = build_training_env(num_envs=num_envs)
+    # Build environment (with Monitor wrapper for TensorBoard metrics)
+    env = build_training_env(num_envs=num_envs, tensorboard_log=tensorboard_log)
     
     # Create model
     model = create_model(
