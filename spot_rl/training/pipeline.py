@@ -82,14 +82,110 @@ def train():
     env.close()
 
 
-def load_policy_for_teleop() -> Tuple[PPO, VecNormalize]:
+def load_policy_for_teleop(require_stats: bool = False) -> Tuple[PPO, VecNormalize]:
+    """
+    Load a trained policy for teleoperation.
+    Automatically detects if model is Genesis-trained and uses appropriate environment.
+    
+    Args:
+        require_stats: If True, requires VecNormalize stats file. If False, 
+                     will try to load without stats (for Genesis-trained models).
+    """
     if not PATHS.model_path.exists():
         raise FileNotFoundError(
-            f"Model file '{PATHS.model_path}' not found. Run scripts/train.py first."
+            f"Model file '{PATHS.model_path}' not found. "
+            f"Expected at: {PATHS.model_path}"
         )
 
-    env = build_visualization_env()
-    model = PPO.load(str(PATHS.model_path), env=env, device=TRAINING.device)
-    return model, env
+    # First, try to inspect the model to see if it's Genesis-trained
+    try:
+        temp_model = PPO.load(str(PATHS.model_path), device=TRAINING.device)
+        is_genesis = (
+            hasattr(temp_model.action_space, 'low') and 
+            hasattr(temp_model.action_space, 'high') and
+            len(temp_model.action_space.low) > 0 and
+            temp_model.action_space.low[0] == -1.0 and 
+            temp_model.action_space.high[0] == 1.0
+        )
+        del temp_model  # Free memory
+        
+        if is_genesis:
+            print("Detected Genesis-trained model. Using Genesis environment...")
+            return _load_genesis_model()
+    except Exception:
+        pass  # If inspection fails, try normal loading
+    
+    # Try to load with stats first (for MuJoCo-trained models)
+    if PATHS.stats_path.exists() or require_stats:
+        try:
+            env = build_visualization_env()
+            model = PPO.load(str(PATHS.model_path), env=env, device=TRAINING.device)
+            return model, env
+        except Exception as e:
+            if require_stats:
+                raise e
+            print(f"Warning: Could not load with VecNormalize stats: {e}")
+            print("Attempting to load without stats...")
+    
+    # Load without VecNormalize (for Genesis-trained models)
+    try:
+        env_base = DummyVecEnv([lambda: make_env(render_mode="human")])
+        model = PPO.load(str(PATHS.model_path), env=env_base, device=TRAINING.device)
+        return model, env_base
+    except Exception as e:
+        # Last resort: try Genesis
+        print(f"Warning: Could not load with MuJoCo: {e}")
+        print("Attempting to load with Genesis environment...")
+        return _load_genesis_model()
+
+
+def _load_genesis_model() -> Tuple[PPO, any]:
+    """Load model with Genesis environment."""
+    try:
+        import genesis as gs
+        from spot_genesis_env import SpotGenesisEnv, GenesisSB3Wrapper
+        
+        # Import here to avoid circular dependency
+        import sys
+        from pathlib import Path
+        PROJECT_ROOT = Path(__file__).resolve().parents[2]
+        scripts_path = str(PROJECT_ROOT / "scripts")
+        if scripts_path not in sys.path:
+            sys.path.insert(0, scripts_path)
+        from train_genesis import get_genesis_configs
+        
+        # Initialize Genesis
+        gs.init(logging_level="warning", backend=gs.constants.backend.cpu)
+        
+        # Get configs
+        env_cfg, obs_cfg, reward_cfg, command_cfg = get_genesis_configs()
+        
+        # Create Genesis environment
+        # Enable viewer for teleop so user can see the robot
+        env_base = SpotGenesisEnv(
+            num_envs=1,
+            env_cfg=env_cfg,
+            obs_cfg=obs_cfg,
+            reward_cfg=reward_cfg,
+            command_cfg=command_cfg,
+            show_viewer=True,  # Enable viewer for teleop visualization
+            device="cpu"
+        )
+        env = GenesisSB3Wrapper(env_base)
+        
+        # Load model
+        model = PPO.load(str(PATHS.model_path), env=env, device=TRAINING.device)
+        return model, env
+    except ImportError as e:
+        raise ImportError(
+            f"Genesis environment required but not available. "
+            f"Install with: pip install genesis-world\n"
+            f"Original error: {e}"
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load model with Genesis environment: {e}\n"
+            f"Make sure the model was trained with Genesis and the environment config matches."
+        )
 
 

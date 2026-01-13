@@ -156,6 +156,9 @@ class SpotGenesisEnv:
         self.jump_toggled_buf = torch.zeros((self.num_envs,), device=self.device)
         self.jump_target_height = torch.zeros((self.num_envs,), device=self.device)
         self.extras = dict()
+        
+        # Manual control flag
+        self._manual_control = False
 
     # --- Command Sampling (Go2 Logic) ---
     def _sample_commands(self, envs_idx):
@@ -176,6 +179,62 @@ class SpotGenesisEnv:
     def _sample_jump_commands(self, envs_idx):
         # Specifically toggle jump command
         self.commands[envs_idx, 4] = gs_rand_float(*self.command_cfg["jump_range"], (len(envs_idx),), self.device)
+
+    def enable_manual_control(self):
+        """Enable manual control mode (disables automatic command resampling)."""
+        self._manual_control = True
+        print("Manual control enabled in Genesis environment.")
+
+    def set_target_velocities(self, lin_vel, ang_vel, height=None, jump=None):
+        """
+        Set target velocities and commands for manual control.
+        
+        Args:
+            lin_vel: Linear velocity [x, y] in m/s (list, array, or tensor)
+            ang_vel: Angular velocity (z-axis) in rad/s (float or tensor)
+            height: Target height in m (optional)
+            jump: Jump command (optional)
+        """
+        if not self._manual_control:
+            self.enable_manual_control()
+        
+        # Convert inputs to appropriate format
+        if isinstance(lin_vel, (list, np.ndarray)):
+            lin_x = float(lin_vel[0]) if len(lin_vel) > 0 else 0.0
+            lin_y = float(lin_vel[1]) if len(lin_vel) > 1 else 0.0
+        elif isinstance(lin_vel, torch.Tensor):
+            lin_x = float(lin_vel[0].item()) if len(lin_vel) > 0 else 0.0
+            lin_y = float(lin_vel[1].item()) if len(lin_vel) > 1 else 0.0
+        else:
+            lin_x = 0.0
+            lin_y = 0.0
+        
+        if isinstance(ang_vel, torch.Tensor):
+            ang_z = float(ang_vel.item())
+        else:
+            ang_z = float(ang_vel)
+        
+        # Set commands for all environments (teleop typically uses single env)
+        self.commands[:, 0] = lin_x
+        self.commands[:, 1] = lin_y
+        self.commands[:, 2] = ang_z
+        
+        if height is not None:
+            height_val = float(height)
+            height_val = max(self.command_cfg["height_range"][0], 
+                           min(self.command_cfg["height_range"][1], height_val))
+            self.commands[:, 3] = height_val
+        
+        if jump is not None:
+            jump_val = float(jump)
+            jump_val = max(self.command_cfg["jump_range"][0],
+                         min(self.command_cfg["jump_range"][1], jump_val))
+            self.commands[:, 4] = jump_val
+
+    @property
+    def manual_control(self):
+        """Check if manual control is enabled."""
+        return self._manual_control
 
     # --- Main Step ---
     def step(self, actions):
@@ -209,19 +268,20 @@ class SpotGenesisEnv:
         self.dof_pos[:] = self.robot.get_dofs_position(self.motor_dofs)
         self.dof_vel[:] = self.robot.get_dofs_velocity(self.motor_dofs)
 
-        # --- Resampling Logic ---
-        envs_idx = (
-            (self.episode_length_buf % int(self.env_cfg["resampling_time_s"] / self.dt) == 0)
-            .nonzero(as_tuple=False)
-            .flatten()
-        )
-        self._sample_commands(envs_idx)
+        # --- Resampling Logic (skip if manual control) ---
+        if not self._manual_control:
+            envs_idx = (
+                (self.episode_length_buf % int(self.env_cfg["resampling_time_s"] / self.dt) == 0)
+                .nonzero(as_tuple=False)
+                .flatten()
+            )
+            self._sample_commands(envs_idx)
 
-        # Random injection logic (5% chance)
-        random_idxs_1 = torch.randperm(self.num_envs)[:int(self.num_envs * 0.05)]
-        self._sample_commands(random_idxs_1)
-        random_idxs_2 = torch.randperm(self.num_envs)[:int(self.num_envs * 0.05)]
-        self._sample_jump_commands(random_idxs_2)
+            # Random injection logic (5% chance)
+            random_idxs_1 = torch.randperm(self.num_envs)[:int(self.num_envs * 0.05)]
+            self._sample_commands(random_idxs_1)
+            random_idxs_2 = torch.randperm(self.num_envs)[:int(self.num_envs * 0.05)]
+            self._sample_jump_commands(random_idxs_2)
 
         # --- Jump State Machine ---
         jump_cmd_now = (self.commands[:, 4] > 0.0).float()
@@ -302,8 +362,13 @@ class SpotGenesisEnv:
         for key in self.episode_sums.keys():
             self.episode_sums[key][envs_idx] = 0.0
 
-        self._sample_commands(envs_idx)
-        self.commands[envs_idx, 3] = self.reward_cfg["base_height_target"] # Enforce default height on reset
+        # Only resample commands if not in manual control mode
+        if not self._manual_control:
+            self._sample_commands(envs_idx)
+            self.commands[envs_idx, 3] = self.reward_cfg["base_height_target"] # Enforce default height on reset
+        else:
+            # In manual control, just reset jump command
+            self.commands[envs_idx, 4] = 0.0
 
     # --- Reward Functions (Go2 Logic) ---
     def _reward_tracking_lin_vel(self):
