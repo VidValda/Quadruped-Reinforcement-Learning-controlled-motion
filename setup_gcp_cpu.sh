@@ -4,6 +4,10 @@
 
 set -e
 
+# Set non-interactive mode to avoid prompts during installation
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
 echo "=========================================="
 echo "Spot RL GCP CPU-Only Setup Script"
 echo "Optimized for maximum parallel environments"
@@ -28,14 +32,23 @@ fi
 
 # Update system packages
 echo "Updating system packages..."
-sudo apt-get update
+sudo DEBIAN_FRONTEND=noninteractive apt-get update
 
 # Install Python and dependencies (Debian-compatible)
+# Also install graphics libraries needed for MuJoCo (OpenGL)
 if [ "$OS" == "debian" ]; then
-    sudo apt-get install -y python3 python3-venv python3-pip git screen tmux wget curl htop
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        -o Dpkg::Options::="--force-confold" \
+        python3 python3-venv python3-pip git screen tmux wget curl htop \
+        libgl1-mesa-glx libglib2.0-0 libgomp1 libegl1-mesa libxrandr2 libxss1 libxcursor1 \
+        libxcomposite1 libasound2 libxi6 libxtst6
     PYTHON_CMD="python3"
 else
-    sudo apt-get install -y python3.10 python3.10-venv python3-pip git screen tmux wget curl htop
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        -o Dpkg::Options::="--force-confold" \
+        python3.10 python3.10-venv python3-pip git screen tmux wget curl htop \
+        libgl1-mesa-glx libglib2.0-0 libgomp1 libegl1-mesa libxrandr2 libxss1 libxcursor1 \
+        libxcomposite1 libasound2 libxi6 libxtst6
     PYTHON_CMD="python3.10"
 fi
 
@@ -53,6 +66,18 @@ cd "$PROJECT_DIR"
 echo "Creating Python virtual environment..."
 $PYTHON_CMD -m venv venv
 source venv/bin/activate
+
+# Set up environment variables for headless rendering (MuJoCo)
+echo "Setting up environment variables for headless rendering..."
+export MUJOCO_GL=egl
+export DISPLAY=:99
+# Add to bashrc for persistence
+if ! grep -q "MUJOCO_GL=egl" ~/.bashrc 2>/dev/null; then
+    echo "" >> ~/.bashrc
+    echo "# MuJoCo headless rendering" >> ~/.bashrc
+    echo "export MUJOCO_GL=egl" >> ~/.bashrc
+    echo "export DISPLAY=:99" >> ~/.bashrc
+fi
 
 # Upgrade pip
 echo "Upgrading pip..."
