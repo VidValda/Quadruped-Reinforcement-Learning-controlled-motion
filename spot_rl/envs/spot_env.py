@@ -97,6 +97,13 @@ class CustomSpotEnv(gym.Env):
         self.command_manager.bind_random_generator(self.np_random)
         mujoco.mj_resetData(self.model, self.data)
 
+        # Initialize robot in homing pose
+        if len(self.default_homing_pose) == self.model.nu:
+            self.data.qpos[7:] = self.default_homing_pose
+            # Set control inputs to match homing pose for consistency
+            self.data.ctrl[:] = self.default_homing_pose
+            mujoco.mj_forward(self.model, self.data)
+
         self.last_action = np.zeros(self.model.nu)
         self.command_manager.reset()
 
