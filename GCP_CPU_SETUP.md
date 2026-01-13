@@ -149,11 +149,15 @@ ls -lh models/
 
 **Note:** Make sure the local `./models/` directory exists before downloading, or the files will be saved in your current directory.
 
-## Step 7: stop and restart the instance
+## Extra: stop and restart the instance
 
 ```bash
 # Start
-gcloud compute instances stop spot-rl-cpu-max --zone=us-central1-c
+gcloud compute instances start spot-rl-cpu-max --zone=us-central1-c
+```
+
+```bash
+gcloud compute ssh spot-rl-cpu-max --zone=us-central1-c
 ```
 
 ```bash

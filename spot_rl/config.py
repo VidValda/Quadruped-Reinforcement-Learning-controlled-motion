@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -29,6 +30,7 @@ class TrainingConfig:
     learning_rate: float = 3e-4
     gamma: float = 0.99
     device: str = "cpu"
+    num_envs: Optional[int] = None 
 
 
 @dataclass(frozen=True)
