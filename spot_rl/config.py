@@ -19,7 +19,7 @@ class SimulationConfig:
     frame_skip: int = 5
     target_height: float = 0.5
     max_episode_steps: int = 2000
-    initial_position: tuple[float, float, float] = (0.0, 0.0, 3)
+    initial_position: tuple[float, float, float] = (0.0, 0.0, 0.55)
 
 
 @dataclass(frozen=True)
