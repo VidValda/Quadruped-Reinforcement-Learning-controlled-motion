@@ -162,7 +162,7 @@ gcloud compute ssh spot-rl-cpu-max --zone=us-central1-c
 
 ```bash
 # Stop
-gcloud compute instances stop spot-rl-cpu-max --zone=us-central1-
+gcloud compute instances stop spot-rl-cpu-max --zone=us-central1-c
 ```
 
 ## Optimal Configurations
