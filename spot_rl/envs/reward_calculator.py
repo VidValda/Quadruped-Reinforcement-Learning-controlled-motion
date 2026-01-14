@@ -20,7 +20,7 @@ class SpotRewardCalculator:
         nominal_pose_penalty_weight: float = 0.3,
         foot_clearance_weight: float = 0.4,
         termination_height_threshold: float = 0.23,
-        termination_reward: float = -10.0,
+        termination_reward: float = -10000.0,
         contact_force_threshold: float = 10.0,
         min_foot_clearance: float = 0.05,
     ) -> None:
