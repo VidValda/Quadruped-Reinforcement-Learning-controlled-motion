@@ -10,6 +10,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 from spot_rl.config import PATHS, TRAINING
+from spot_rl.envs.info_wrapper import InfoCollectorWrapper
 from spot_rl.envs.spot_env import make_env
 from spot_rl.training.callbacks import TensorBoardMetricsCallback
 
@@ -39,6 +40,8 @@ def build_training_env(
     def make_env_fn(rank: int):
         """Create a single environment wrapped with Monitor for TensorBoard logging."""
         env = make_env(render_mode=None)
+        # Wrap with InfoCollectorWrapper to capture info dicts for custom metrics
+        env = InfoCollectorWrapper(env)
         # Monitor wrapper is essential for logging rollout metrics like ep_rew_mean
         # It collects episode rewards and lengths for TensorBoard
         if tensorboard_log:
