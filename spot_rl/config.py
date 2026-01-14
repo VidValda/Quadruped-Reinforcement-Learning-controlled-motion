@@ -24,7 +24,7 @@ class SimulationConfig:
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    total_timesteps: int = 6_000_000
+    total_timesteps: int = 15_000_000
     n_steps: int = 1024
     batch_size: int = 4096
     n_epochs: int = 10
@@ -36,8 +36,8 @@ class TrainingConfig:
 
 @dataclass(frozen=True)
 class PathConfig:
-    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v30.zip"
-    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v30.pkl"
+    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v31.zip"
+    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v31.pkl"
     tensorboard_log: Path = ROOT_DIR / "spot_tensorboard_advanced"
 
 
