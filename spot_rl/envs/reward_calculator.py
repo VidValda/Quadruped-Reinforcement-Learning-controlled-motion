@@ -16,7 +16,7 @@ class SpotRewardCalculator:
         orientation_penalty_weight: float = 1.0,
         action_rate_weight: float = 0.1,  
         control_cost_weight: float = 0.05,
-        joint_vel_penalty_weight: float = 0.01,
+        joint_vel_penalty_weight: float = 0.05,
         nominal_pose_penalty_weight: float = 0.5,
         foot_clearance_weight: float = 1.0,
         termination_height_threshold: float = 0.23,
@@ -237,7 +237,7 @@ class SpotRewardCalculator:
         joint_vel_penalty_component = -self.joint_vel_penalty_weight * joint_vel_penalty
         nominal_pose_penalty_component = -self.nominal_pose_penalty_weight * nominal_pose_penalty
         foot_clearance_reward_component = self.foot_clearance_weight * foot_clearance_reward
-
+        height_penalty_component = -self.height_penalty_weight * height_penalty
         info = {
             "lin_vel_error": float(lin_vel_error),
             "ang_vel_error": float(np.sqrt(ang_vel_error)),  # Convert squared error to absolute error
@@ -253,6 +253,7 @@ class SpotRewardCalculator:
             "rewards/joint_vel_penalty": float(joint_vel_penalty_component),
             "rewards/nominal_pose_penalty": float(nominal_pose_penalty_component),
             "rewards/foot_clearance": float(foot_clearance_reward_component),
+            "rewards/height_penalty": float(height_penalty_component),
             # Tracking metrics
             "tracking/linear_velocity_error": float(lin_vel_error),
             "tracking/angular_velocity_error": float(np.sqrt(ang_vel_error)),

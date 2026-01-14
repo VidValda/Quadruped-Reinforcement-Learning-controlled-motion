@@ -59,6 +59,7 @@ class TensorBoardMetricsCallback(BaseCallback):
             "rewards/joint_vel_penalty",
             "rewards/nominal_pose_penalty",
             "rewards/foot_clearance",
+            "rewards/height_penalty",
             # Tracking metrics
             "tracking/linear_velocity_error",
             "tracking/angular_velocity_error",
