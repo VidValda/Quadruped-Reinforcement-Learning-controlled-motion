@@ -17,7 +17,7 @@ class CommandConfig:
 @dataclass(frozen=True)
 class SimulationConfig:
     frame_skip: int = 5
-    target_height: float = 0.5
+    target_height: float = 0.5247
     max_episode_steps: int = 2000
     initial_position: tuple[float, float, float] = (0.0, 0.0, 0.55)
 
@@ -36,8 +36,8 @@ class TrainingConfig:
 
 @dataclass(frozen=True)
 class PathConfig:
-    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v23.zip"
-    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v23.pkl"
+    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v25.zip"
+    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v25.pkl"
     tensorboard_log: Path = ROOT_DIR / "spot_tensorboard_advanced"
 
 
