@@ -1,7 +1,7 @@
 import numpy as np
 import mujoco
 
-from spot_rl.envs.utils import quat_to_roll_pitch
+from spot_rl.envs.utils import quat_to_roll_pitch, global_to_local_velocity
 
 
 class SpotRewardCalculator:
@@ -148,10 +148,19 @@ class SpotRewardCalculator:
         return foot_positions
     
     def __call__(self, data, action, last_action, target_lin_vel, target_ang_vel, torso_body_id: int):
-        current_lin_vel = data.body(torso_body_id).cvel[3:5]
-        current_ang_vel = data.body(torso_body_id).cvel[2]
+        # Get global frame velocities from MuJoCo
+        # cvel format: [wx, wy, wz, vx, vy, vz] in global frame
+        global_ang_vel_3d = data.body(torso_body_id).cvel[0:3]  # [wx, wy, wz] in global frame
+        global_lin_vel_3d = data.body(torso_body_id).cvel[3:6]  # [vx, vy, vz] in global frame
         torso_z_pos = data.body(torso_body_id).xpos[2]
         torso_quat = data.body(torso_body_id).xquat
+
+        # Transform global velocities to local (robot) frame
+        local_lin_vel_3d = global_to_local_velocity(global_lin_vel_3d, torso_quat)
+        local_ang_vel_3d = global_to_local_velocity(global_ang_vel_3d, torso_quat)
+        # Extract only x and y components for 2D movement tracking
+        current_lin_vel = local_lin_vel_3d[:2]  # [vx_local, vy_local]
+        current_ang_vel = local_ang_vel_3d[2]  # wz_local (yaw rate in local frame)
 
         lin_vel_error = np.linalg.norm(target_lin_vel - current_lin_vel)
         ang_vel_error = np.square(target_ang_vel - current_ang_vel)
