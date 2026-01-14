@@ -377,25 +377,102 @@ class SpotRewardCalculator:
     def __init__(
         self,
         target_height: float,
+        model: mujoco.MjModel,
+        default_homing_pose: np.ndarray,
         lin_vel_weight: float = 2.0,
         ang_vel_weight: float = 1.0,
         height_penalty_weight: float = 2.0,
         orientation_penalty_weight: float = 1.0,
         action_rate_weight: float = 1,
         control_cost_weight: float = 0.03,
+        joint_vel_penalty_weight: float = 0.5,
+        nominal_pose_penalty_weight: float = 0.3,
+        foot_clearance_weight: float = 0.4,
         termination_height_threshold: float = 0.2,
         termination_reward: float = -10.0,
+        contact_force_threshold: float = 10.0,
+        min_foot_clearance: float = 0.05,
     ) -> None:
         self.target_height = target_height
+        self.model = model
+        self.default_homing_pose = default_homing_pose
         self.lin_vel_weight = lin_vel_weight
         self.ang_vel_weight = ang_vel_weight
         self.height_penalty_weight = height_penalty_weight
         self.orientation_penalty_weight = orientation_penalty_weight
         self.action_rate_weight = action_rate_weight
         self.control_cost_weight = control_cost_weight
+        self.joint_vel_penalty_weight = joint_vel_penalty_weight
+        self.nominal_pose_penalty_weight = nominal_pose_penalty_weight
+        self.foot_clearance_weight = foot_clearance_weight
         self.termination_height_threshold = termination_height_threshold
         self.termination_reward = termination_reward
+        self.contact_force_threshold = contact_force_threshold
+        self.min_foot_clearance = min_foot_clearance
+        
+        # Find foot body IDs (common Spot naming conventions)
+        self.foot_body_ids = []
+        foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot",
+                      "fl_foot", "fr_foot", "rl_foot", "rr_foot",
+                      "foot_fl", "foot_fr", "foot_rl", "foot_rr"]
+        
+        for foot_name in foot_names:
+            foot_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, foot_name)
+            if foot_id != -1:
+                self.foot_body_ids.append(foot_id)
+        
+        # If no foot bodies found by name, try to find them by searching for bodies with "foot" in name
+        if len(self.foot_body_ids) == 0:
+            for i in range(self.model.nbody):
+                body_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, i)
+                if body_name and "foot" in body_name.lower():
+                    self.foot_body_ids.append(i)
+        
+        # If still no feet found, we'll use contact detection based on geom names
+        # For now, we'll detect contacts generically
+        print(f"Found {len(self.foot_body_ids)} foot bodies: {self.foot_body_ids}")
 
+    def _get_foot_contacts(self, data):
+        """Detect which feet are in contact with the ground (Stance Phase)."""
+        foot_contacts = np.zeros(len(self.foot_body_ids), dtype=bool)
+        
+        # Find floor geom ID (usually named "floor")
+        floor_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
+        
+        # Check contacts for each foot
+        for i, foot_id in enumerate(self.foot_body_ids):
+            # Check if any contact involves this foot body
+            for j in range(data.ncon):
+                contact = data.contact[j]
+                # Check if contact involves the foot body
+                geom1_id = contact.geom1
+                geom2_id = contact.geom2
+                
+                # Get body IDs for the geoms
+                body1_id = self.model.geom_bodyid[geom1_id]
+                body2_id = self.model.geom_bodyid[geom2_id]
+                
+                # Check if contact is with floor and involves foot
+                # dist < 0 means penetration (contact), dist > 0 means separation
+                is_contact = contact.dist < 0.001  # Small threshold for contact
+                involves_foot = (body1_id == foot_id or body2_id == foot_id)
+                involves_floor = (floor_geom_id != -1 and (geom1_id == floor_geom_id or geom2_id == floor_geom_id))
+                
+                # If we have foot bodies, check if contact involves foot
+                # Otherwise, check if contact involves floor (generic detection)
+                if involves_foot and (involves_floor or floor_geom_id == -1) and is_contact:
+                    foot_contacts[i] = True
+                    break
+        
+        return foot_contacts
+    
+    def _get_foot_positions(self, data):
+        """Get foot positions (z-coordinate for clearance calculation)."""
+        foot_positions = np.zeros(len(self.foot_body_ids))
+        for i, foot_id in enumerate(self.foot_body_ids):
+            foot_positions[i] = data.body(foot_id).xpos[2]
+        return foot_positions
+    
     def __call__(self, data, action, last_action, target_lin_vel, target_ang_vel, torso_body_id: int):
         current_lin_vel = data.body(torso_body_id).cvel[3:5]
         current_ang_vel = data.body(torso_body_id).cvel[2]
@@ -415,6 +492,36 @@ class SpotRewardCalculator:
 
         action_rate_penalty = np.sum(np.square(action - last_action))
         control_cost = np.sum(np.square(action))
+        
+        # Joint Velocity Penalty: Penalize frantic joint movements
+        joint_velocities = data.qvel[6:]  # Skip root velocities (first 6)
+        joint_vel_penalty = np.sum(np.square(joint_velocities))
+        
+        # Nominal Pose Penalty: Penalize deviation from standing pose
+        current_joint_positions = data.qpos[7:]  # Skip root position (first 7: x, y, z, quat)
+        if len(current_joint_positions) == len(self.default_homing_pose):
+            joint_pos_error = current_joint_positions - self.default_homing_pose
+            nominal_pose_penalty = np.sum(np.square(joint_pos_error))
+        else:
+            nominal_pose_penalty = 0.0
+        
+        # Foot Contact Detection (Stance vs Swing Phase)
+        foot_contacts = self._get_foot_contacts(data)
+        foot_positions = self._get_foot_positions(data)
+        
+        # Foot Clearance Reward: Reward lifting feet during swing phase
+        foot_clearance_reward = 0.0
+        num_swing_feet = 0
+        for i in range(len(foot_contacts)):
+            if not foot_contacts[i]:  # Swing phase (foot in air)
+                num_swing_feet += 1
+                # Reward foot clearance above minimum threshold
+                clearance = max(0.0, foot_positions[i] - self.min_foot_clearance)
+                foot_clearance_reward += clearance
+        
+        # Normalize by number of swing feet (avoid division by zero)
+        if num_swing_feet > 0:
+            foot_clearance_reward = foot_clearance_reward / num_swing_feet
 
         reward = (
             self.lin_vel_weight * lin_vel_reward
@@ -423,6 +530,9 @@ class SpotRewardCalculator:
             - self.orientation_penalty_weight * orientation_penalty
             - self.action_rate_weight * action_rate_penalty
             - self.control_cost_weight * control_cost
+            - self.joint_vel_penalty_weight * joint_vel_penalty
+            - self.nominal_pose_penalty_weight * nominal_pose_penalty
+            + self.foot_clearance_weight * foot_clearance_reward
         )
 
         terminated = torso_z_pos < self.termination_height_threshold
@@ -431,10 +541,16 @@ class SpotRewardCalculator:
 
         info = {
             "lin_vel_error": float(lin_vel_error),
-            "ang_vel_error": float(ang_vel_error),
+            "ang_vel_error": float(np.sqrt(ang_vel_error)),
             "torso_height": float(torso_z_pos),
             "roll": float(roll),
             "pitch": float(pitch),
+            "rewards/joint_vel_penalty": float(-self.joint_vel_penalty_weight * joint_vel_penalty),
+            "rewards/nominal_pose_penalty": float(-self.nominal_pose_penalty_weight * nominal_pose_penalty),
+            "rewards/foot_clearance": float(self.foot_clearance_weight * foot_clearance_reward),
+            "gait/stance_feet": int(np.sum(foot_contacts)),
+            "gait/swing_feet": int(num_swing_feet),
+            "gait/foot_clearance": float(foot_clearance_reward),
         }
 
         return reward, terminated, info
@@ -491,7 +607,11 @@ class CustomSpotEnv(gym.Env):
         )
         self.command_manager = CommandManager(command_config, self.dt)
 
-        self.reward_calculator = SpotRewardCalculator(target_height=self.target_height)
+        self.reward_calculator = SpotRewardCalculator(
+            target_height=self.target_height,
+            model=self.model,
+            default_homing_pose=self.default_homing_pose
+        )
 
         num_actuators = self.model.nu
         self.action_space = spaces.Box(low=-0.5, high=0.5, shape=(num_actuators,), dtype=np.float32)

@@ -58,7 +58,11 @@ class CustomSpotEnv(gym.Env):
         )
         self.command_manager = CommandManager(command_config, self.dt)
 
-        self.reward_calculator = SpotRewardCalculator(target_height=self.target_height)
+        self.reward_calculator = SpotRewardCalculator(
+            target_height=self.target_height,
+            model=self.model,
+            default_homing_pose=self.default_homing_pose
+        )
 
         num_actuators = self.model.nu
         self.action_space = spaces.Box(low=-0.5, high=0.5, shape=(num_actuators,), dtype=np.float32)
