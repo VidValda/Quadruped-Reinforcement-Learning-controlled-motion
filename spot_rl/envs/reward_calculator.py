@@ -41,10 +41,10 @@ class SpotRewardCalculator:
         self.contact_force_threshold = contact_force_threshold
         self.min_foot_clearance = min_foot_clearance
         
-        # Find foot body IDs (common Spot naming conventions)
+        self.foot_body_offsets = None
+        
         self.foot_body_ids = []
         
-        # DEBUG: Print all body names to see what's available
         print("=" * 80)
         print("DEBUG: All body names in model:")
         print("=" * 80)
@@ -57,7 +57,6 @@ class SpotRewardCalculator:
         print(f"Total bodies: {self.model.nbody}")
         print("=" * 80)
         
-        # DEBUG: Print all geom names to see what's available
         print("\nDEBUG: All geom names in model:")
         print("=" * 80)
         for i in range(self.model.ngeom):
@@ -71,7 +70,6 @@ class SpotRewardCalculator:
         print(f"Total geoms: {self.model.ngeom}")
         print("=" * 80)
         
-        # Try to find foot bodies by exact name match (common Spot naming conventions)
         foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot",
                       "fl_foot", "fr_foot", "rl_foot", "rr_foot",
                       "foot_fl", "foot_fr", "foot_rl", "foot_rr",
@@ -88,7 +86,6 @@ class SpotRewardCalculator:
             else:
                 print(f"  ✗ Not found: '{foot_name}'")
         
-        # If no foot bodies found by name, try to find them by searching for bodies with "foot" in name
         if len(self.foot_body_ids) == 0:
             print("\nDEBUG: No exact matches found. Searching for bodies with 'foot' in name:")
             for i in range(self.model.nbody):
@@ -97,7 +94,6 @@ class SpotRewardCalculator:
                     self.foot_body_ids.append(i)
                     print(f"  ✓ Found '{body_name}' (ID {i}) - contains 'foot'")
         
-        # If still no feet found, use lower leg bodies (lleg = lower leg, which typically represents the foot)
         if len(self.foot_body_ids) == 0:
             print("\nDEBUG: No foot bodies found. Using lower leg bodies as feet:")
             lower_leg_names = ["fl_lleg", "fr_lleg", "hl_lleg", "hr_lleg"]
@@ -109,7 +105,6 @@ class SpotRewardCalculator:
                 else:
                     print(f"  ✗ Not found: '{leg_name}'")
         
-        # Print final result
         print("\n" + "=" * 80)
         print(f"FINAL: Found {len(self.foot_body_ids)} foot bodies: {self.foot_body_ids}")
         if len(self.foot_body_ids) > 0:
@@ -122,33 +117,23 @@ class SpotRewardCalculator:
         print("=" * 80 + "\n")
 
     def _get_foot_contacts(self, data):
-        """Detect which feet are in contact with the ground (Stance Phase)."""
         foot_contacts = np.zeros(len(self.foot_body_ids), dtype=bool)
         
-        # Find floor geom ID (usually named "floor")
         floor_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
         
-        # Check contacts for each foot
         for i, foot_id in enumerate(self.foot_body_ids):
-            # Check if any contact involves this foot body
             for j in range(data.ncon):
                 contact = data.contact[j]
-                # Check if contact involves the foot body
                 geom1_id = contact.geom1
                 geom2_id = contact.geom2
                 
-                # Get body IDs for the geoms
                 body1_id = self.model.geom_bodyid[geom1_id]
                 body2_id = self.model.geom_bodyid[geom2_id]
                 
-                # Check if contact is with floor and involves foot
-                # dist < 0 means penetration (contact), dist > 0 means separation
-                is_contact = contact.dist < 0.001  # Small threshold for contact
+                is_contact = contact.dist < 0.001
                 involves_foot = (body1_id == foot_id or body2_id == foot_id)
                 involves_floor = (floor_geom_id != -1 and (geom1_id == floor_geom_id or geom2_id == floor_geom_id))
                 
-                # If we have foot bodies, check if contact involves foot
-                # Otherwise, check if contact involves floor (generic detection)
                 if involves_foot and (involves_floor or floor_geom_id == -1) and is_contact:
                     foot_contacts[i] = True
                     break
@@ -198,17 +183,28 @@ class SpotRewardCalculator:
         foot_contacts = self._get_foot_contacts(data)
         foot_positions = self._get_foot_positions(data)
         
+        # Estimate foot body offset from stance feet (where foot tip is at ground level)
+        if self.foot_body_offsets is None:
+            self.foot_body_offsets = np.full(len(self.foot_body_ids), 0.26)
+        for i in range(len(foot_contacts)):
+            if foot_contacts[i]:
+                self.foot_body_offsets[i] = foot_positions[i]
+        
         # Foot Clearance Reward: Reward lifting feet during swing phase
         foot_clearance_reward = 0.0
         num_swing_feet = 0
         for i in range(len(foot_contacts)):
-            if not foot_contacts[i]:  # Swing phase (foot in air)
+            if not foot_contacts[i]:
                 num_swing_feet += 1
-                # Reward foot clearance above minimum threshold
-                clearance = max(0.0, foot_positions[i] - self.min_foot_clearance)
-                foot_clearance_reward += clearance
+                if self.foot_body_offsets[i] > 0:
+                    foot_tip_z = foot_positions[i] - self.foot_body_offsets[i]
+                else:
+                    foot_tip_z = foot_positions[i] * 0.5
+                
+                clearance = max(0.0, foot_tip_z)
+                excess_clearance = max(0.0, clearance - self.min_foot_clearance)
+                foot_clearance_reward += excess_clearance
         
-        # Normalize by number of swing feet (avoid division by zero)
         if num_swing_feet > 0:
             foot_clearance_reward = foot_clearance_reward / num_swing_feet
 
