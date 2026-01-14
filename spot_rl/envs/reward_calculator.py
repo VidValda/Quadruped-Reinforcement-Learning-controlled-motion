@@ -193,18 +193,24 @@ class SpotRewardCalculator:
         # Foot Clearance Reward: Reward lifting feet during swing phase
         foot_clearance_reward = 0.0
         num_swing_feet = 0
+        target_clearance = 0.07  # The "Perfect" step height (7cm)
+
         for i in range(len(foot_contacts)):
-            if not foot_contacts[i]:
+            if not foot_contacts[i]:  # Swing phase (foot in air)
                 num_swing_feet += 1
+                
+                # Calculate foot tip height relative to ground
                 if self.foot_body_offsets[i] > 0:
                     foot_tip_z = foot_positions[i] - self.foot_body_offsets[i]
                 else:
                     foot_tip_z = foot_positions[i] * 0.5
                 
-                clearance = max(0.0, foot_tip_z)
-                excess_clearance = max(0.0, clearance - self.min_foot_clearance)
-                foot_clearance_reward += excess_clearance
+                # BELL CURVE LOGIC:
+                # Reward peaks at target_clearance, decays if too low OR too high.
+                # The '150' controls the strictness (higher = narrower curve).
+                foot_clearance_reward += np.exp(-150 * (foot_tip_z - target_clearance)**2)
         
+        # Normalize by number of swing feet (avoid division by zero)
         if num_swing_feet > 0:
             foot_clearance_reward = foot_clearance_reward / num_swing_feet
 
