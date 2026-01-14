@@ -62,7 +62,10 @@ class CommandManager:
         if self._np_random is None:
             raise RuntimeError("CommandManager requires a bound random generator before sampling.")
 
-        self.target_lin_vel[0] = self._np_random.uniform(*self._config.lin_vel_x_range)
-        self.target_lin_vel[1] = self._np_random.uniform(*self._config.lin_vel_y_range)
-        self.target_ang_vel = self._np_random.uniform(*self._config.ang_vel_range)
-
+        if self._np_random.random() < 0.2:
+            self.target_lin_vel[:] = 0.0
+            self.target_ang_vel = 0.0
+        else:
+            self.target_lin_vel[0] = self._np_random.uniform(*self._config.lin_vel_x_range)
+            self.target_lin_vel[1] = self._np_random.uniform(*self._config.lin_vel_y_range)
+            self.target_ang_vel = self._np_random.uniform(*self._config.ang_vel_range)
