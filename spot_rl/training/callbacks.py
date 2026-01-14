@@ -50,14 +50,24 @@ class TensorBoardMetricsCallback(BaseCallback):
         """Extract metrics from infos (can be list of dicts or single dict)."""
         # List of metric keys to extract and log
         metric_keys = [
+            # Reward components
             "rewards/lin_vel",
             "rewards/ang_vel",
             "rewards/orientation",
             "rewards/torques",
             "rewards/action_rate",
+            "rewards/joint_vel_penalty",
+            "rewards/nominal_pose_penalty",
+            "rewards/foot_clearance",
+            # Tracking metrics
             "tracking/linear_velocity_error",
             "tracking/angular_velocity_error",
+            # Performance metrics
             "performance/action_rate",
+            # Gait metrics
+            "gait/stance_feet",
+            "gait/swing_feet",
+            "gait/foot_clearance",
         ]
         
         # Handle different info formats

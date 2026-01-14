@@ -19,7 +19,7 @@ class SimulationConfig:
     frame_skip: int = 5
     target_height: float = 0.5
     max_episode_steps: int = 2000
-    initial_position: tuple[float, float, float] = (0.0, 0.0, 0.55)
+    initial_position: tuple[float, float, float] = (0.0, 0.0, 3)
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ class TrainingConfig:
     n_steps: int = 1024
     batch_size: int = 4096
     n_epochs: int = 10
-    learning_rate: float = 3e-4
+    learning_rate: float = 1e-4
     gamma: float = 0.99
     device: str = "cpu"
     num_envs: Optional[int] = None 
@@ -36,8 +36,8 @@ class TrainingConfig:
 
 @dataclass(frozen=True)
 class PathConfig:
-    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v22.zip"
-    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v22.pkl"
+    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v23.zip"
+    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v23.pkl"
     tensorboard_log: Path = ROOT_DIR / "spot_tensorboard_advanced"
 
 

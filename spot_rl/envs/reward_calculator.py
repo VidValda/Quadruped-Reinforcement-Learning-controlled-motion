@@ -43,25 +43,83 @@ class SpotRewardCalculator:
         
         # Find foot body IDs (common Spot naming conventions)
         self.foot_body_ids = []
+        
+        # DEBUG: Print all body names to see what's available
+        print("=" * 80)
+        print("DEBUG: All body names in model:")
+        print("=" * 80)
+        all_body_names = []
+        for i in range(self.model.nbody):
+            body_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, i)
+            if body_name:
+                all_body_names.append((i, body_name))
+                print(f"  Body ID {i:3d}: '{body_name}'")
+        print(f"Total bodies: {self.model.nbody}")
+        print("=" * 80)
+        
+        # DEBUG: Print all geom names to see what's available
+        print("\nDEBUG: All geom names in model:")
+        print("=" * 80)
+        for i in range(self.model.ngeom):
+            geom_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, i)
+            geom_body_id = self.model.geom_bodyid[i]
+            geom_body_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, geom_body_id)
+            if geom_name:
+                print(f"  Geom ID {i:3d}: '{geom_name}' -> Body '{geom_body_name}' (ID {geom_body_id})")
+            else:
+                print(f"  Geom ID {i:3d}: <unnamed> -> Body '{geom_body_name}' (ID {geom_body_id})")
+        print(f"Total geoms: {self.model.ngeom}")
+        print("=" * 80)
+        
+        # Try to find foot bodies by exact name match (common Spot naming conventions)
         foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot",
                       "fl_foot", "fr_foot", "rl_foot", "rr_foot",
-                      "foot_fl", "foot_fr", "foot_rl", "foot_rr"]
+                      "foot_fl", "foot_fr", "foot_rl", "foot_rr",
+                      "FL_foot_link", "FR_foot_link", "RL_foot_link", "RR_foot_link",
+                      "fl_foot_link", "fr_foot_link", "rl_foot_link", "rr_foot_link"]
         
+        print("\nDEBUG: Searching for foot bodies by name:")
+        print(f"  Searching for: {foot_names}")
         for foot_name in foot_names:
             foot_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, foot_name)
             if foot_id != -1:
                 self.foot_body_ids.append(foot_id)
+                print(f"  ✓ Found '{foot_name}' -> ID {foot_id}")
+            else:
+                print(f"  ✗ Not found: '{foot_name}'")
         
         # If no foot bodies found by name, try to find them by searching for bodies with "foot" in name
         if len(self.foot_body_ids) == 0:
+            print("\nDEBUG: No exact matches found. Searching for bodies with 'foot' in name:")
             for i in range(self.model.nbody):
                 body_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, i)
                 if body_name and "foot" in body_name.lower():
                     self.foot_body_ids.append(i)
+                    print(f"  ✓ Found '{body_name}' (ID {i}) - contains 'foot'")
         
-        # If still no feet found, we'll use contact detection based on geom names
-        # For now, we'll detect contacts generically
-        print(f"Found {len(self.foot_body_ids)} foot bodies: {self.foot_body_ids}")
+        # If still no feet found, use lower leg bodies (lleg = lower leg, which typically represents the foot)
+        if len(self.foot_body_ids) == 0:
+            print("\nDEBUG: No foot bodies found. Using lower leg bodies as feet:")
+            lower_leg_names = ["fl_lleg", "fr_lleg", "hl_lleg", "hr_lleg"]
+            for leg_name in lower_leg_names:
+                leg_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, leg_name)
+                if leg_id != -1:
+                    self.foot_body_ids.append(leg_id)
+                    print(f"  ✓ Using '{leg_name}' (ID {leg_id}) as foot body")
+                else:
+                    print(f"  ✗ Not found: '{leg_name}'")
+        
+        # Print final result
+        print("\n" + "=" * 80)
+        print(f"FINAL: Found {len(self.foot_body_ids)} foot bodies: {self.foot_body_ids}")
+        if len(self.foot_body_ids) > 0:
+            print("Foot body names:")
+            for foot_id in self.foot_body_ids:
+                foot_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, foot_id)
+                print(f"  ID {foot_id}: '{foot_name}'")
+        else:
+            print("WARNING: No foot bodies found! Foot contact detection will not work.")
+        print("=" * 80 + "\n")
 
     def _get_foot_contacts(self, data):
         """Detect which feet are in contact with the ground (Stance Phase)."""
