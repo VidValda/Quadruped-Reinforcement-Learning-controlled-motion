@@ -36,7 +36,7 @@ class TrainingConfig:
 
 @dataclass(frozen=True)
 class PathConfig:
-    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v2o.zip"
+    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v20.zip"
     stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v20.pkl"
     tensorboard_log: Path = ROOT_DIR / "spot_tensorboard_advanced"
 

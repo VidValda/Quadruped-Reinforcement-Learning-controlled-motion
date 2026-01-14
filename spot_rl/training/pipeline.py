@@ -133,6 +133,16 @@ def train():
     print(f"\nTraining complete!")
     print(f"Model saved: {PATHS.model_path}")
     print(f"Stats saved: {PATHS.stats_path}")
+    
+    model_filename = PATHS.model_path.name
+    stats_filename = PATHS.stats_path.name
+    remote_base = "/home/david/Quadruped-Reinforcement-Learning-controlled-motion"
+    instance = "spot-rl-cpu-max"
+    zone = "us-central1-c"
+    
+    print(f"\nTo download from GCP instance:")
+    print(f"gcloud compute scp {instance}:{remote_base}/models/{model_filename} ./models/ --zone={zone}")
+    print(f"gcloud compute scp {instance}:{remote_base}/stats/{stats_filename} ./stats/ --zone={zone}")
 
 
 def load_policy_for_teleop() -> Tuple[PPO, VecNormalize]:
