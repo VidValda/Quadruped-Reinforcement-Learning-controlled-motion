@@ -11,6 +11,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNorm
 
 from spot_rl.config import PATHS, TRAINING
 from spot_rl.envs.spot_env import make_env
+from spot_rl.training.callbacks import TensorBoardMetricsCallback
 
 
 def _ensure_parent(path: Path):
@@ -121,8 +122,11 @@ def train():
     # Create model
     model = create_model(env, tensorboard_log=tensorboard_log)
 
+    # Create callback for custom TensorBoard metrics
+    metrics_callback = TensorBoardMetricsCallback()
+
     print(f"\nStarting training for {total_timesteps:,} timesteps...")
-    model.learn(total_timesteps=total_timesteps)
+    model.learn(total_timesteps=total_timesteps, callback=metrics_callback)
 
     _ensure_parent(PATHS.model_path)
     _ensure_parent(PATHS.stats_path)

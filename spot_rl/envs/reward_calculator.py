@@ -7,7 +7,7 @@ class SpotRewardCalculator:
     def __init__(
         self,
         target_height: float,
-        lin_vel_weight: float = 2.0,
+        lin_vel_weight: float = 2.5,
         ang_vel_weight: float = 1.0,
         height_penalty_weight: float = 2.0,
         orientation_penalty_weight: float = 1.0,
@@ -59,12 +59,30 @@ class SpotRewardCalculator:
         if terminated:
             reward = self.termination_reward
 
+        # Calculate individual reward components for logging
+        lin_vel_reward_component = self.lin_vel_weight * lin_vel_reward
+        ang_vel_reward_component = self.ang_vel_weight * ang_vel_reward
+        orientation_penalty_component = -self.orientation_penalty_weight * orientation_penalty
+        control_cost_component = -self.control_cost_weight * control_cost
+        action_rate_component = -self.action_rate_weight * action_rate_penalty
+
         info = {
             "lin_vel_error": float(lin_vel_error),
-            "ang_vel_error": float(ang_vel_error),
+            "ang_vel_error": float(np.sqrt(ang_vel_error)),  # Convert squared error to absolute error
             "torso_height": float(torso_z_pos),
             "roll": float(roll),
             "pitch": float(pitch),
+            # Reward components for TensorBoard
+            "rewards/lin_vel": float(lin_vel_reward_component),
+            "rewards/ang_vel": float(ang_vel_reward_component),
+            "rewards/orientation": float(orientation_penalty_component),
+            "rewards/torques": float(control_cost_component),
+            "rewards/action_rate": float(action_rate_component),
+            # Tracking metrics
+            "tracking/linear_velocity_error": float(lin_vel_error),
+            "tracking/angular_velocity_error": float(np.sqrt(ang_vel_error)),
+            # Performance metrics
+            "performance/action_rate": float(np.sqrt(action_rate_penalty)),  # Use sqrt for better scale
         }
 
         return reward, terminated, info
