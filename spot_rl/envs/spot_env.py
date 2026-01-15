@@ -61,8 +61,16 @@ class CustomSpotEnv(gym.Env):
         self.reward_calculator = SpotRewardCalculator(
             target_height=self.target_height,
             model=self.model,
-            default_homing_pose=self.default_homing_pose
+            default_homing_pose=self.default_homing_pose,
+            dt=self.dt
         )
+        
+        # Domain randomization
+        self.friction_range = (0.5, 1.25)
+        self.push_interval = 10.0  # seconds
+        self.push_magnitude = 0.5  # m/s
+        self.last_push_time = 0.0
+        self.current_friction = None
 
         num_actuators = self.model.nu
         self.action_space = spaces.Box(low=-0.5, high=0.5, shape=(num_actuators,), dtype=np.float32)
@@ -73,17 +81,34 @@ class CustomSpotEnv(gym.Env):
         num_sensors = 0
         num_commands = 3
 
-        total_obs_dim = num_joint_pos + num_joint_vel + num_root_vel + 1 + 2 + num_sensors + num_commands
+        # Base observation dimension (single frame)
+        base_obs_dim = num_joint_pos + num_joint_vel + num_root_vel + 1 + 2 + num_sensors + num_commands
+        
+        # Frame stacking: 3 frames (current, t-1, t-2)
+        self.num_frames = 3
+        total_obs_dim = base_obs_dim * self.num_frames
+        
+        # Store observation history for frame stacking
+        self.obs_history = [np.zeros(base_obs_dim, dtype=np.float32) for _ in range(self.num_frames)]
 
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(total_obs_dim,), dtype=np.float32)
 
     def _get_obs(self):
-        return build_observation(
+        """Get current observation and stack with previous frames."""
+        current_obs = build_observation(
             self.data,
             self.torso_body_id,
             self.command_manager.target_lin_vel,
             self.command_manager.target_ang_vel,
         )
+        
+        # Update observation history: shift frames and add current
+        # obs_history[0] = t-2, obs_history[1] = t-1, obs_history[2] = current
+        self.obs_history = self.obs_history[1:] + [current_obs]
+        
+        # Stack all frames: [current, t-1, t-2]
+        stacked_obs = np.concatenate(self.obs_history)
+        return stacked_obs
 
     def enable_manual_control(self):
         self.command_manager.enable_manual_control()
@@ -115,6 +140,19 @@ class CustomSpotEnv(gym.Env):
 
         self.last_action = np.zeros(self.model.nu)
         self.command_manager.reset()
+        
+        # Domain randomization: Randomize friction every episode
+        self._randomize_friction()
+        self.last_push_time = 0.0
+        
+        # Reset observation history (fill with current observation)
+        base_obs = build_observation(
+            self.data,
+            self.torso_body_id,
+            self.command_manager.target_lin_vel,
+            self.command_manager.target_ang_vel,
+        )
+        self.obs_history = [base_obs.copy() for _ in range(self.num_frames)]
 
         obs = self._get_obs()
         info = {}
@@ -123,6 +161,33 @@ class CustomSpotEnv(gym.Env):
             self.render()
 
         return obs, info
+    
+    def _randomize_friction(self):
+        """Randomize ground friction between [0.5, 1.25] every episode."""
+        friction_min, friction_max = self.friction_range
+        self.current_friction = self.np_random.uniform(friction_min, friction_max)
+        
+        # Apply friction to all geoms that contact the floor
+        floor_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
+        if floor_geom_id != -1:
+            # Set friction for floor geom
+            self.model.geom_friction[floor_geom_id, 0] = self.current_friction
+            self.model.geom_friction[floor_geom_id, 1] = self.current_friction
+            self.model.geom_friction[floor_geom_id, 2] = self.current_friction
+    
+    def _apply_random_push(self, current_time: float):
+        """Apply a random velocity shove to the robot's base every ~10 seconds."""
+        if current_time - self.last_push_time >= self.push_interval:
+            # Random direction in xy plane
+            angle = self.np_random.uniform(0, 2 * np.pi)
+            push_vel_x = self.push_magnitude * np.cos(angle)
+            push_vel_y = self.push_magnitude * np.sin(angle)
+            
+            # Apply push to base velocity
+            self.data.qvel[0] += push_vel_x  # vx
+            self.data.qvel[1] += push_vel_y  # vy
+            
+            self.last_push_time = current_time
 
     def step(self, action):
         action = np.clip(action, self.action_space.low, self.action_space.high)
@@ -130,6 +195,10 @@ class CustomSpotEnv(gym.Env):
 
         final_action_clipped = np.clip(final_action, -2 * np.pi, 2 * np.pi)
         self.data.ctrl[:] = final_action_clipped
+
+        # Apply random push before step (domain randomization)
+        current_time = self.data.time
+        self._apply_random_push(current_time)
 
         mujoco.mj_step(self.model, self.data, nstep=self.frame_skip)
         self.command_manager.step()

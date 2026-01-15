@@ -10,142 +10,79 @@ class SpotRewardCalculator:
         target_height: float,
         model: mujoco.MjModel,
         default_homing_pose: np.ndarray,
-        lin_vel_weight: float = 1.5,
-        ang_vel_weight: float = 0.5,
-        height_penalty_weight: float = 3.0,
-        orientation_penalty_weight: float = 1.25,
+        dt: float = 0.02,
         termination_reward: float = -20.0,
         termination_height_threshold: float = 0.26,
-        action_rate_weight: float = 0.015,
-        control_cost_weight: float = 0.001,
-        joint_vel_penalty_weight: float = 0.0015,
-        nominal_pose_penalty_weight: float = 0.25,
-        foot_clearance_weight: float = 0.0,
-        contact_force_threshold: float = 10.0,
-        min_foot_clearance: float = 0.05,
     ) -> None:
         self.target_height = target_height
         self.model = model
         self.default_homing_pose = default_homing_pose
-        self.lin_vel_weight = lin_vel_weight
-        self.ang_vel_weight = ang_vel_weight
-        self.height_penalty_weight = height_penalty_weight
-        self.orientation_penalty_weight = orientation_penalty_weight
-        self.action_rate_weight = action_rate_weight
-        self.control_cost_weight = control_cost_weight
-        self.joint_vel_penalty_weight = joint_vel_penalty_weight
-        self.nominal_pose_penalty_weight = nominal_pose_penalty_weight
-        self.foot_clearance_weight = foot_clearance_weight
+        self.dt = dt
         self.termination_height_threshold = termination_height_threshold
         self.termination_reward = termination_reward
-        self.contact_force_threshold = contact_force_threshold
-        self.min_foot_clearance = min_foot_clearance
         
-        self.foot_body_offsets = None
+        # Paper weights (normalized for dt)
+        # Using dt=0.02 as default (frame_skip=5 * timestep=0.004)
+        self.lin_vel_weight = 1.0 * dt  # +1.0 per dt
+        self.ang_vel_weight = 0.5 * dt  # +0.5 per dt
+        self.lin_vel_z_penalty_weight = -2.0 * dt  # -2.0 per dt (squared)
+        self.ang_vel_xy_penalty_weight = -0.05 * dt  # -0.05 per dt (squared)
+        self.joint_torques_weight = -0.0002 * dt  # -0.0002 per dt
+        self.action_rate_weight = -0.01 * dt  # -0.01 per dt
+        self.collision_weight = -0.01 * dt  # -0.01 per dt (or -0.001 as mentioned)
         
-        self.foot_body_ids = []
-        
-        print("=" * 80)
-        print("DEBUG: All body names in model:")
-        print("=" * 80)
-        all_body_names = []
-        for i in range(self.model.nbody):
-            body_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, i)
-            if body_name:
-                all_body_names.append((i, body_name))
-                print(f"  Body ID {i:3d}: '{body_name}'")
-        print(f"Total bodies: {self.model.nbody}")
-        print("=" * 80)
-        
-        print("\nDEBUG: All geom names in model:")
-        print("=" * 80)
-        for i in range(self.model.ngeom):
-            geom_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, i)
-            geom_body_id = self.model.geom_bodyid[i]
-            geom_body_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, geom_body_id)
-            if geom_name:
-                print(f"  Geom ID {i:3d}: '{geom_name}' -> Body '{geom_body_name}' (ID {geom_body_id})")
-            else:
-                print(f"  Geom ID {i:3d}: <unnamed> -> Body '{geom_body_name}' (ID {geom_body_id})")
-        print(f"Total geoms: {self.model.ngeom}")
-        print("=" * 80)
-        
-        foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot",
-                      "fl_foot", "fr_foot", "rl_foot", "rr_foot",
-                      "foot_fl", "foot_fr", "foot_rl", "foot_rr",
-                      "FL_foot_link", "FR_foot_link", "RL_foot_link", "RR_foot_link",
-                      "fl_foot_link", "fr_foot_link", "rl_foot_link", "rr_foot_link"]
-        
-        print("\nDEBUG: Searching for foot bodies by name:")
-        print(f"  Searching for: {foot_names}")
-        for foot_name in foot_names:
-            foot_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, foot_name)
-            if foot_id != -1:
-                self.foot_body_ids.append(foot_id)
-                print(f"  ✓ Found '{foot_name}' -> ID {foot_id}")
-            else:
-                print(f"  ✗ Not found: '{foot_name}'")
-        
-        if len(self.foot_body_ids) == 0:
-            print("\nDEBUG: No exact matches found. Searching for bodies with 'foot' in name:")
-            for i in range(self.model.nbody):
-                body_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, i)
-                if body_name and "foot" in body_name.lower():
-                    self.foot_body_ids.append(i)
-                    print(f"  ✓ Found '{body_name}' (ID {i}) - contains 'foot'")
-        
-        if len(self.foot_body_ids) == 0:
-            print("\nDEBUG: No foot bodies found. Using lower leg bodies as feet:")
-            lower_leg_names = ["fl_lleg", "fr_lleg", "hl_lleg", "hr_lleg"]
-            for leg_name in lower_leg_names:
-                leg_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, leg_name)
-                if leg_id != -1:
-                    self.foot_body_ids.append(leg_id)
-                    print(f"  ✓ Using '{leg_name}' (ID {leg_id}) as foot body")
-                else:
-                    print(f"  ✗ Not found: '{leg_name}'")
-        
-        print("\n" + "=" * 80)
-        print(f"FINAL: Found {len(self.foot_body_ids)} foot bodies: {self.foot_body_ids}")
-        if len(self.foot_body_ids) > 0:
-            print("Foot body names:")
-            for foot_id in self.foot_body_ids:
-                foot_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, foot_id)
-                print(f"  ID {foot_id}: '{foot_name}'")
-        else:
-            print("WARNING: No foot bodies found! Foot contact detection will not work.")
-        print("=" * 80 + "\n")
-
-    def _get_foot_contacts(self, data):
-        foot_contacts = np.zeros(len(self.foot_body_ids), dtype=bool)
-        
+        # Find collision geoms (knees and base)
+        self.collision_geom_ids = []
+        self._find_collision_geoms()
+    
+    def _find_collision_geoms(self):
+        """Find geom IDs for knees and base that should not hit the floor."""
         floor_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
         
-        for i, foot_id in enumerate(self.foot_body_ids):
-            for j in range(data.ncon):
-                contact = data.contact[j]
+        # Search for knee and base geoms
+        knee_keywords = ["knee", "uleg", "upper_leg", "thigh"]
+        base_keywords = ["base", "body", "torso", "chassis"]
+        
+        for i in range(self.model.ngeom):
+            geom_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, i)
+            if geom_name:
+                geom_name_lower = geom_name.lower()
+                # Skip floor and foot geoms
+                if "floor" in geom_name_lower or "foot" in geom_name_lower:
+                    continue
+                # Check if it's a knee or base geom
+                if any(keyword in geom_name_lower for keyword in knee_keywords + base_keywords):
+                    self.collision_geom_ids.append(i)
+        
+        # If no specific geoms found, use all non-floor, non-foot geoms
+        if len(self.collision_geom_ids) == 0:
+            for i in range(self.model.ngeom):
+                geom_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, i)
+                if geom_name and "floor" not in geom_name.lower() and "foot" not in geom_name.lower():
+                    self.collision_geom_ids.append(i)
+    
+    def _get_collisions(self, data):
+        """Count collisions between knees/base and floor."""
+        floor_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
+        if floor_geom_id == -1:
+            return 0
+        
+        collision_count = 0
+        for j in range(data.ncon):
+            contact = data.contact[j]
+            if contact.dist < 0.001:  # In contact
                 geom1_id = contact.geom1
                 geom2_id = contact.geom2
                 
-                body1_id = self.model.geom_bodyid[geom1_id]
-                body2_id = self.model.geom_bodyid[geom2_id]
+                # Check if collision involves floor and a collision geom
+                involves_floor = (geom1_id == floor_geom_id or geom2_id == floor_geom_id)
+                involves_collision_geom = (geom1_id in self.collision_geom_ids or 
+                                          geom2_id in self.collision_geom_ids)
                 
-                is_contact = contact.dist < 0.001
-                involves_foot = (body1_id == foot_id or body2_id == foot_id)
-                involves_floor = (floor_geom_id != -1 and (geom1_id == floor_geom_id or geom2_id == floor_geom_id))
-                
-                if involves_foot and (involves_floor or floor_geom_id == -1) and is_contact:
-                    foot_contacts[i] = True
-                    break
+                if involves_floor and involves_collision_geom:
+                    collision_count += 1
         
-        return foot_contacts
-    
-    def _get_foot_positions(self, data):
-        """Get foot positions (z-coordinate for clearance calculation)."""
-        foot_positions = np.zeros(len(self.foot_body_ids))
-        for i, foot_id in enumerate(self.foot_body_ids):
-            foot_positions[i] = data.body(foot_id).xpos[2]
-        return foot_positions
+        return collision_count
     
     def __call__(self, data, action, last_action, target_lin_vel, target_ang_vel, torso_body_id: int):
         # Get global frame velocities from MuJoCo
@@ -158,82 +95,52 @@ class SpotRewardCalculator:
         # Transform global velocities to local (robot) frame
         local_lin_vel_3d = global_to_local_velocity(global_lin_vel_3d, torso_quat)
         local_ang_vel_3d = global_to_local_velocity(global_ang_vel_3d, torso_quat)
-        # Extract only x and y components for 2D movement tracking
-        current_lin_vel = local_lin_vel_3d[:2]  # [vx_local, vy_local]
-        current_ang_vel = local_ang_vel_3d[2]  # wz_local (yaw rate in local frame)
+        
+        # Extract components for tracking
+        current_lin_vel_xy = local_lin_vel_3d[:2]  # [vx_local, vy_local]
+        current_lin_vel_z = local_lin_vel_3d[2]  # vz_local (vertical velocity)
+        current_ang_vel_z = local_ang_vel_3d[2]  # wz_local (yaw rate)
+        current_ang_vel_xy = local_ang_vel_3d[:2]  # [wx_local, wy_local] (roll/pitch rates)
 
-
-        lin_vel_error = np.sum(np.square(target_lin_vel - current_lin_vel))
-        ang_vel_error = np.square(target_ang_vel - current_ang_vel)
-
+        # Paper reward formulation: φ(x) = exp(-x²/0.25)
+        lin_vel_error = np.sum(np.square(target_lin_vel - current_lin_vel_xy))
+        ang_vel_error = np.square(target_ang_vel - current_ang_vel_z)
+        
         lin_vel_reward = np.exp(-lin_vel_error / 0.25)
         ang_vel_reward = np.exp(-ang_vel_error / 0.25)
 
-        roll, pitch = quat_to_roll_pitch(torso_quat)
+        # Penalties (squared terms)
+        lin_vel_z_penalty = np.square(current_lin_vel_z)  # Penalize vertical bouncing
+        ang_vel_xy_penalty = np.sum(np.square(current_ang_vel_xy))  # Penalize roll/pitch rates
 
-        height_penalty = np.square(torso_z_pos - self.target_height)
-        orientation_penalty = np.square(roll) + np.square(pitch)
-
+        # Action rate penalty: ||a_t - a_{t-1}||²
         action_rate_penalty = np.sum(np.square(action - last_action))
-        control_cost = np.sum(np.square(action))
         
-        # Joint Velocity Penalty: Penalize frantic joint movements
-        joint_velocities = data.qvel[6:]  # Skip root velocities (first 6)
-        joint_vel_penalty = np.sum(np.square(joint_velocities))
-        
-        # Nominal Pose Penalty: Penalize deviation from standing pose
-        current_joint_positions = data.qpos[7:]  # Skip root position (first 7: x, y, z, quat)
-        if len(current_joint_positions) == len(self.default_homing_pose):
-            joint_pos_error = current_joint_positions - self.default_homing_pose
-            nominal_pose_penalty = np.sum(np.square(joint_pos_error))
+        # Joint torques penalty: ||τ||²
+        # Get joint torques from MuJoCo (actuator forces)
+        # Try multiple ways to access actuator forces
+        if hasattr(data, 'actuator_force') and len(data.actuator_force) > 0:
+            joint_torques = data.actuator_force[:]
+        elif hasattr(data, 'qfrc_actuator') and len(data.qfrc_actuator) >= self.model.nu:
+            # qfrc_actuator includes root forces, so skip first 6 (root) and take joint torques
+            joint_torques = data.qfrc_actuator[6:6+self.model.nu] if len(data.qfrc_actuator) > 6 else data.qfrc_actuator
         else:
-            nominal_pose_penalty = 0.0
+            # Fallback: use action as proxy (less accurate but better than zero)
+            joint_torques = action
+        joint_torques_penalty = np.sum(np.square(joint_torques))
         
-        # Foot Contact Detection (Stance vs Swing Phase)
-        foot_contacts = self._get_foot_contacts(data)
-        foot_positions = self._get_foot_positions(data)
-        
-        # Estimate foot body offset from stance feet (where foot tip is at ground level)
-        if self.foot_body_offsets is None:
-            self.foot_body_offsets = np.full(len(self.foot_body_ids), 0.26)
-        for i in range(len(foot_contacts)):
-            if foot_contacts[i]:
-                self.foot_body_offsets[i] = foot_positions[i]
-        
-        # Foot Clearance Reward: Reward lifting feet during swing phase
-        foot_clearance_reward = 0.0
-        num_swing_feet = 0
-        target_clearance = 0.07  # The "Perfect" step height (7cm)
+        # Collision penalty: count collisions between knees/base and floor
+        collision_count = self._get_collisions(data)
 
-        for i in range(len(foot_contacts)):
-            if not foot_contacts[i]:  # Swing phase (foot in air)
-                num_swing_feet += 1
-                
-                # Calculate foot tip height relative to ground
-                if self.foot_body_offsets[i] > 0:
-                    foot_tip_z = foot_positions[i] - self.foot_body_offsets[i]
-                else:
-                    foot_tip_z = foot_positions[i] * 0.5
-                
-                # BELL CURVE LOGIC:
-                # Reward peaks at target_clearance, decays if too low OR too high.
-                # The '150' controls the strictness (higher = narrower curve).
-                foot_clearance_reward += np.exp(-150 * (foot_tip_z - target_clearance)**2)
-        
-        # Normalize by number of swing feet (avoid division by zero)
-        if num_swing_feet > 0:
-            foot_clearance_reward = foot_clearance_reward / num_swing_feet
-
+        # Compute total reward (weights already include dt normalization)
         reward = (
             self.lin_vel_weight * lin_vel_reward
             + self.ang_vel_weight * ang_vel_reward
-            - self.height_penalty_weight * height_penalty
-            - self.orientation_penalty_weight * orientation_penalty
-            - self.action_rate_weight * action_rate_penalty
-            - self.control_cost_weight * control_cost
-            - self.joint_vel_penalty_weight * joint_vel_penalty
-            - self.nominal_pose_penalty_weight * nominal_pose_penalty
-            + self.foot_clearance_weight * foot_clearance_reward
+            + self.lin_vel_z_penalty_weight * lin_vel_z_penalty
+            + self.ang_vel_xy_penalty_weight * ang_vel_xy_penalty
+            + self.joint_torques_weight * joint_torques_penalty
+            + self.action_rate_weight * action_rate_penalty
+            + self.collision_weight * collision_count
         )
 
         terminated = torso_z_pos < self.termination_height_threshold
@@ -243,38 +150,36 @@ class SpotRewardCalculator:
         # Calculate individual reward components for logging
         lin_vel_reward_component = self.lin_vel_weight * lin_vel_reward
         ang_vel_reward_component = self.ang_vel_weight * ang_vel_reward
-        orientation_penalty_component = -self.orientation_penalty_weight * orientation_penalty
-        control_cost_component = -self.control_cost_weight * control_cost
-        action_rate_component = -self.action_rate_weight * action_rate_penalty
-        joint_vel_penalty_component = -self.joint_vel_penalty_weight * joint_vel_penalty
-        nominal_pose_penalty_component = -self.nominal_pose_penalty_weight * nominal_pose_penalty
-        foot_clearance_reward_component = self.foot_clearance_weight * foot_clearance_reward
-        height_penalty_component = -self.height_penalty_weight * height_penalty
+        lin_vel_z_penalty_component = self.lin_vel_z_penalty_weight * lin_vel_z_penalty
+        ang_vel_xy_penalty_component = self.ang_vel_xy_penalty_weight * ang_vel_xy_penalty
+        joint_torques_component = self.joint_torques_weight * joint_torques_penalty
+        action_rate_component = self.action_rate_weight * action_rate_penalty
+        collision_component = self.collision_weight * collision_count
+        
+        roll, pitch = quat_to_roll_pitch(torso_quat)
+        
         info = {
             "lin_vel_error": float(lin_vel_error),
-            "ang_vel_error": float(np.sqrt(ang_vel_error)),  # Convert squared error to absolute error
+            "ang_vel_error": float(np.sqrt(ang_vel_error)),
             "torso_height": float(torso_z_pos),
             "roll": float(roll),
             "pitch": float(pitch),
             # Reward components for TensorBoard
             "rewards/lin_vel": float(lin_vel_reward_component),
             "rewards/ang_vel": float(ang_vel_reward_component),
-            "rewards/orientation": float(orientation_penalty_component),
-            "rewards/torques": float(control_cost_component),
+            "rewards/lin_vel_z_penalty": float(lin_vel_z_penalty_component),
+            "rewards/ang_vel_xy_penalty": float(ang_vel_xy_penalty_component),
+            "rewards/joint_torques": float(joint_torques_component),
             "rewards/action_rate": float(action_rate_component),
-            "rewards/joint_vel_penalty": float(joint_vel_penalty_component),
-            "rewards/nominal_pose_penalty": float(nominal_pose_penalty_component),
-            "rewards/foot_clearance": float(foot_clearance_reward_component),
-            "rewards/height_penalty": float(height_penalty_component),
+            "rewards/collisions": float(collision_component),
             # Tracking metrics
             "tracking/linear_velocity_error": float(lin_vel_error),
             "tracking/angular_velocity_error": float(np.sqrt(ang_vel_error)),
+            "tracking/linear_velocity_z": float(current_lin_vel_z),
+            "tracking/angular_velocity_xy": float(np.linalg.norm(current_ang_vel_xy)),
             # Performance metrics
-            "performance/action_rate": float(np.sqrt(action_rate_penalty)),  # Use sqrt for better scale
-            # Stance/Swing phase tracking
-            "gait/stance_feet": int(np.sum(foot_contacts)),
-            "gait/swing_feet": int(num_swing_feet),
-            "gait/foot_clearance": float(foot_clearance_reward),
+            "performance/action_rate": float(np.sqrt(action_rate_penalty)),
+            "performance/collision_count": int(collision_count),
         }
 
         return reward, terminated, info

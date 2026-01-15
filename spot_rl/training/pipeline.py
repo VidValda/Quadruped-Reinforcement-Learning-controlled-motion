@@ -12,7 +12,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNorm
 from spot_rl.config import PATHS, TRAINING
 from spot_rl.envs.info_wrapper import InfoCollectorWrapper
 from spot_rl.envs.spot_env import make_env
-from spot_rl.training.callbacks import TensorBoardMetricsCallback
+from spot_rl.training.callbacks import TensorBoardMetricsCallback, TimeoutBootstrappingCallback
 
 
 def _ensure_parent(path: Path):
@@ -119,11 +119,16 @@ def train():
     # Create model
     model = create_model(env, tensorboard_log=tensorboard_log)
 
-    # Create callback for custom TensorBoard metrics
+    # Create callbacks for custom TensorBoard metrics and time-out bootstrapping
     metrics_callback = TensorBoardMetricsCallback()
+    timeout_callback = TimeoutBootstrappingCallback()
+    
+    # Combine callbacks
+    from stable_baselines3.common.callbacks import CallbackList
+    callbacks = CallbackList([metrics_callback, timeout_callback])
 
     print(f"\nStarting training for {total_timesteps:,} timesteps...")
-    model.learn(total_timesteps=total_timesteps, callback=metrics_callback)
+    model.learn(total_timesteps=total_timesteps, callback=callbacks)
 
     _ensure_parent(PATHS.model_path)
     _ensure_parent(PATHS.stats_path)
