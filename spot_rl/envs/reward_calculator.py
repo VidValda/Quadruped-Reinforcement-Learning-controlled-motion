@@ -20,7 +20,7 @@ class SpotRewardCalculator:
         control_cost_weight: float = 0.001,
         joint_vel_penalty_weight: float = 0.0015,
         nominal_pose_penalty_weight: float = 0.25,
-        foot_clearance_weight: float = 0.0,
+        foot_clearance_weight: float = 0.0001,
         contact_force_threshold: float = 10.0,
         min_foot_clearance: float = 0.05,
     ) -> None:
