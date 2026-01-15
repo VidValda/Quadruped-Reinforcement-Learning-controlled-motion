@@ -52,6 +52,7 @@ pip install -r requirements.txt
 ```
 
 **Dependencies:**
+
 - `gymnasium`: Gym API for RL environments
 - `mujoco`: MuJoCo physics simulator
 - `stable-baselines3[extra]`: PPO implementation and vectorized environments
@@ -60,6 +61,7 @@ pip install -r requirements.txt
 - `pynput`: Keyboard input for teleoperation (optional, only needed for teleop mode)
 
 **Notes:**
+
 - `pynput` is only required for teleoperation but bundled in `requirements.txt`.
 - GPU training uses whatever device is exposed to PyTorch; otherwise `TRAINING.device` defaults to CPU (see `spot_rl/config.py`).
 - The project uses `SubprocVecEnv` for parallel training, which scales with CPU core count.
@@ -71,18 +73,21 @@ pip install -r requirements.txt
 All tunables live in `spot_rl/config.py`:
 
 ### `COMMAND` (CommandConfig)
+
 - `lin_vel_x_range`: Linear velocity range in x-direction (default: `(-0.5, 1.0)`)
 - `lin_vel_y_range`: Linear velocity range in y-direction (default: `(-0.3, 0.3)`)
 - `ang_vel_range`: Angular velocity range (default: `(-0.3, 0.3)`)
 - `resampling_time_s`: Time interval for resampling velocity commands during training (default: `6.0`)
 
 ### `SIMULATION` (SimulationConfig)
+
 - `frame_skip`: Number of simulation steps per action (default: `5`)
 - `target_height`: Target torso height in meters (default: `0.5247`)
 - `max_episode_steps`: Maximum steps per episode (default: `4000`)
 - `initial_position`: Starting position `(x, y, z)` (default: `(0.0, 0.0, 0.55)`)
 
 ### `TRAINING` (TrainingConfig)
+
 - `total_timesteps`: Total training timesteps (default: `15_000_000`)
 - `n_steps`: Steps per rollout (default: `1024`)
 - `batch_size`: Batch size for PPO updates (default: `4096`)
@@ -96,6 +101,7 @@ All tunables live in `spot_rl/config.py`:
 - `num_envs`: Number of parallel environments (default: `None`, uses CPU count)
 
 ### `PATHS` (PathConfig)
+
 - `model_path`: Path to save/load trained model (default: `models/ppo_spot_v44.zip`)
 - `stats_path`: Path to save/load VecNormalize statistics (default: `stats/vec_normalize_stats_v44.pkl`)
 - `tensorboard_log`: TensorBoard log directory (default: `spot_tensorboard_advanced`)
@@ -116,16 +122,19 @@ python main.py --mode train
 **What happens:**
 
 1. **Environment Setup**: `build_training_env()` creates `SubprocVecEnv` with one worker per CPU core (or `TRAINING.num_envs` if specified). Each environment is wrapped with:
+
    - `InfoCollectorWrapper`: Captures info dicts for custom metrics
    - `Monitor`: Logs episode statistics for TensorBoard
    - `VecNormalize`: Normalizes observations and rewards
 
 2. **Model Creation**: `create_model()` builds a Stable-Baselines3 PPO agent with:
+
    - MLP policy network
    - Hyper-parameters from `TRAINING` config
    - TensorBoard logging enabled
 
 3. **Training Loop**: The model trains for `TRAINING.total_timesteps` with:
+
    - Custom `TensorBoardMetricsCallback` logging reward components
    - Automatic episode statistics collection via Monitor wrapper
 
@@ -171,6 +180,7 @@ python scripts/teleop.py
 **Workflow:**
 
 1. **Loading**: `load_policy_for_teleop()` loads:
+
    - Model checkpoint from `PATHS.model_path`
    - VecNormalize statistics from `PATHS.stats_path`
    - Environment in evaluation mode (`training=False`, `norm_reward=False`)
@@ -178,6 +188,7 @@ python scripts/teleop.py
 2. **Manual Control**: The environment switches to manual command mode via `enable_manual_control()`.
 
 3. **Keyboard Controls**: `KeyboardController` maps:
+
    - `w/s`: Increase/decrease forward linear velocity (`lin_x`)
    - `a/d`: Increase/decrease lateral linear velocity (`lin_y`)
    - `q/e`: Increase/decrease angular velocity (`ang_z`)
@@ -204,7 +215,9 @@ python scripts/teleop.py
 ## Environment Details
 
 ### Observation Space
+
 The observation includes:
+
 - Joint positions (excluding root)
 - Joint velocities (excluding root)
 - Local root velocities (linear and angular in robot frame)
@@ -214,11 +227,13 @@ The observation includes:
 - Target angular velocity (scalar)
 
 ### Action Space
+
 - Box space with shape `(num_actuators,)` and range `[-0.5, 0.5]`
 - Actions are added to the default homing pose to produce final joint positions
 - Final actions are clipped to `[-2π, 2π]`
 
 ### Reward Function
+
 The reward calculator (`spot_rl/envs/reward_calculator.py`) includes:
 
 - **Velocity Tracking**: Exponential rewards for matching target linear/angular velocities
@@ -232,6 +247,7 @@ The reward calculator (`spot_rl/envs/reward_calculator.py`) includes:
 **Termination**: Episode terminates if torso height drops below `0.26m` (configurable via `termination_height_threshold`).
 
 ### Command Management
+
 During training, velocity commands are randomly sampled from `COMMAND` ranges and resampled every `resampling_time_s` seconds. There's a 20% chance of sampling zero velocity (stop command). During teleoperation, commands are set manually via keyboard input.
 
 ---
@@ -240,17 +256,20 @@ During training, velocity commands are randomly sampled from `COMMAND` ranges an
 
 - **Version Management**: Keep multiple versions of `models/*.zip` and `stats/*.pkl` so you can roll back or compare experiments. Update version numbers in `config.py`.
 
-- **Render Modes**: 
+- **Render Modes**:
+
   - Training uses `render_mode=None` (headless) for performance
   - Teleoperation uses `render_mode="human"` for visualization
   - You can test with `render_mode="human"` in training, but it will be slower
 
-- **Custom Rewards/Observations**: 
+- **Custom Rewards/Observations**:
+
   - Tweak `spot_rl/envs/reward_calculator.py` to experiment with locomotion behaviors
   - Modify `spot_rl/envs/observation_builder.py` to change the observation space
   - Adjust reward weights in `SpotRewardCalculator.__init__()` to emphasize different behaviors
 
 - **Command Ranges**: Adjust `COMMAND` ranges in the config to:
+
   - Explore faster gaits (increase velocity ranges)
   - Enforce safer boundaries during teleop (reduce ranges)
   - Train for specific behaviors (e.g., forward-only locomotion)
