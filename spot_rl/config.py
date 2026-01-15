@@ -9,7 +9,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 @dataclass(frozen=True)
 class CommandConfig:
     lin_vel_x_range: tuple[float, float] = (-0.5, 1)
-    lin_vel_y_range: tuple[float, float] = (-0.3, 0.3)
+    lin_vel_y_range: tuple[float, float] = (-0.5, 0.5)
     ang_vel_range: tuple[float, float] = (-0.3, 0.3)
     resampling_time_s: float = 6.0
 
@@ -36,8 +36,8 @@ class TrainingConfig:
 
 @dataclass(frozen=True)
 class PathConfig:
-    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v37.zip"
-    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v37.pkl"
+    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v38.zip"
+    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v38.pkl"
     tensorboard_log: Path = ROOT_DIR / "spot_tensorboard_advanced"
 
 
