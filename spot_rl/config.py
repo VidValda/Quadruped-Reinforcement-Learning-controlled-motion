@@ -28,7 +28,7 @@ class TrainingConfig:
     n_steps: int = 1024
     batch_size: int = 4096
     n_epochs: int = 10
-    learning_rate: float = 1e-4
+    learning_rate: float = 3e-4
     gamma: float = 0.99
     device: str = "cpu"
     num_envs: Optional[int] = None 
@@ -36,8 +36,8 @@ class TrainingConfig:
 
 @dataclass(frozen=True)
 class PathConfig:
-    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v33.zip"
-    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v33.pkl"
+    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v34.zip"
+    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v34.pkl"
     tensorboard_log: Path = ROOT_DIR / "spot_tensorboard_advanced"
 
 
