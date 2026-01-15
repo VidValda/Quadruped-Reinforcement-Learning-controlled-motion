@@ -85,15 +85,6 @@ def create_model(
     env: VecNormalize,
     tensorboard_log: Optional[str] = None,
 ) -> PPO:
-    """Create PPO model with specified configuration.
-    
-    Args:
-        env: Vectorized normalized environment.
-        tensorboard_log: Directory for TensorBoard logs. If None, uses PATHS.tensorboard_log.
-    
-    Returns:
-        Configured PPO model ready for training.
-    """
     log_dir = tensorboard_log if tensorboard_log is not None else str(PATHS.tensorboard_log)
     return PPO(
         "MlpPolicy",
@@ -105,6 +96,9 @@ def create_model(
         n_epochs=TRAINING.n_epochs,
         learning_rate=TRAINING.learning_rate,
         gamma=TRAINING.gamma,
+        gae_lambda=TRAINING.gae_lambda,
+        clip_range=TRAINING.clip_range,
+        ent_coef=TRAINING.ent_coef,
         device=TRAINING.device,
     )
 

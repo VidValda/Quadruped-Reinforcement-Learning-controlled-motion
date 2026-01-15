@@ -162,11 +162,12 @@ class SpotRewardCalculator:
         current_lin_vel = local_lin_vel_3d[:2]  # [vx_local, vy_local]
         current_ang_vel = local_ang_vel_3d[2]  # wz_local (yaw rate in local frame)
 
-        lin_vel_error = np.linalg.norm(target_lin_vel - current_lin_vel)
+
+        lin_vel_error = np.sum(np.square(target_lin_vel - current_lin_vel))
         ang_vel_error = np.square(target_ang_vel - current_ang_vel)
 
-        lin_vel_reward = np.exp(-1.5 * lin_vel_error)
-        ang_vel_reward = np.exp(-1.0 * ang_vel_error)
+        lin_vel_reward = np.exp(-lin_vel_error / 0.25)
+        ang_vel_reward = np.exp(-ang_vel_error / 0.25)
 
         roll, pitch = quat_to_roll_pitch(torso_quat)
 
