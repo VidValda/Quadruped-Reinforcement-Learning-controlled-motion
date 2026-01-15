@@ -9,7 +9,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 @dataclass(frozen=True)
 class CommandConfig:
     lin_vel_x_range: tuple[float, float] = (-0.5, 1)
-    lin_vel_y_range: tuple[float, float] = (-0.5, 0.5)
+    lin_vel_y_range: tuple[float, float] = (-0.3, 0.3)
     ang_vel_range: tuple[float, float] = (-0.3, 0.3)
     resampling_time_s: float = 6.0
 
@@ -24,7 +24,7 @@ class SimulationConfig:
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    total_timesteps: int = 30_000_000
+    total_timesteps: int = 15_000_000
     n_steps: int = 1024
     batch_size: int = 4096
     n_epochs: int = 10
@@ -39,8 +39,8 @@ class TrainingConfig:
 
 @dataclass(frozen=True)
 class PathConfig:
-    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v43.zip"
-    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v43.pkl"
+    model_path: Path = ROOT_DIR / "models" / "ppo_spot_v44.zip"
+    stats_path: Path = ROOT_DIR / "stats" / "vec_normalize_stats_v44.pkl"
     tensorboard_log: Path = ROOT_DIR / "spot_tensorboard_advanced"
 
 

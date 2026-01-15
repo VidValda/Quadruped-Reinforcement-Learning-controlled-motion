@@ -17,7 +17,7 @@ class SpotRewardCalculator:
         termination_reward: float = -20.0,
         termination_height_threshold: float = 0.26,
         action_rate_weight: float = 0.015,
-        control_cost_weight: float = 0.001,
+        control_cost_weight: float = 0.003,
         joint_vel_penalty_weight: float = 0.0015,
         nominal_pose_penalty_weight: float = 0.25,
         foot_clearance_weight: float = 0.0001,
